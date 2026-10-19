@@ -2,7 +2,7 @@
 
 Every change below is relative to upstream
 `lokalizator-repo/TwitchDropsFarmer@v1.3.0`. Files touched: `main.js`,
-`preload.js`, `renderer.js`, `package.json`.
+`preload.js`, `renderer.js`, `gql-queries.json`, `package.json`.
 
 ---
 
@@ -41,12 +41,10 @@ $ curl -s -X POST https://id.twitch.tv/oauth2/device -d "client_id=ue6666qo983ts
 {"device_code":"...","user_code":"...","verification_uri":"https://www.twitch.tv/activate", ...}
 ```
 
-`main.js` — three places, so the token and the requests that carry it agree:
-
-```diff
--    'Client-Id': tokens.clientId || 'kimne78kx3ncx6brgo4mv6wki5h1ko',
-+    'Client-Id': tokens.clientId || 'ue6666qo983tsx6so1t0vnawi233wa',
-```
+The TV client id is used **only to obtain a token** — every GraphQL query this app
+sends is a *web* query, and Twitch answers web queries sent with the TV client id
+with `dropCampaigns: null` and no error at all (see §5). So the token request keeps
+the TV client id:
 
 ```diff
 -      body: 'client_id=kimne78kx3ncx6brgo4mv6wki5h1ko&scopes='
@@ -58,13 +56,20 @@ $ curl -s -X POST https://id.twitch.tv/oauth2/device -d "client_id=ue6666qo983ts
 +      body: `client_id=ue6666qo983tsx6so1t0vnawi233wa&device_code=...`
 ```
 
-`renderer.js` — the token object built after a successful device login records the
-client id that the token belongs to:
+…while the GQL `Client-Id` header stays on the web client id, in `main.js` *and* for
+the token object the renderer builds after a successful device login:
 
 ```diff
--                        clientId: 'kimne78kx3ncx6brgo4mv6wki5h1ko',
-+                        clientId: 'ue6666qo983tsx6so1t0vnawi233wa',
+   'Client-Id': tokens.clientId || 'kimne78kx3ncx6brgo4mv6wki5h1ko',   // main.js — unchanged
 ```
+
+```diff
+-                        clientId: 'ue6666qo983tsx6so1t0vnawi233wa',
++                        clientId: WEB_CLIENT_ID,   // 'kimne78kx3ncx6brgo4mv6wki5h1ko'
+```
+
+(An earlier build of this fork did store the TV client id as the GQL client id; §5
+covers what that broke and the migration that undoes it.)
 
 ## 3. Login dialog hygiene (`renderer.js`)
 
@@ -125,6 +130,94 @@ automatically.
 
 ---
 
+## 5. Empty campaign list, empty inventory, "failed integrity check"
+
+Symptom reported from the real app: header shows the account, but **Active Campaigns**
+says *No campaigns found.* and **My Inventory** lists drops with placeholder icons
+instead of artwork.
+
+Every query in `gql-queries.json` (`ViewerDropsDashboard`, `Inventory`, …) is a query
+the *web* client sends, and Twitch requires the `Client-Id` header, the `Authorization`
+token and the `Client-Integrity` token to belong to the same client. A device-code
+login had put the TV client id into `tokens.clientId`, which produced this:
+
+```
+TV token   + TV  Client-Id : http=200 currentUser=object campaigns=null   (no error!)
+TV token   + web Client-Id : http=200 currentUser=object campaigns=null   errors=[failed integrity check]
+web token  + web Client-Id : http=200 currentUser=object campaigns=null   errors=[failed integrity check]
+```
+
+Two consequences:
+
+1. **`dropCampaigns: null`, no error** → the renderer's `INTEGRITY_REQUIRED` branch
+   never ran, so the integrity bot was never asked to refresh, so the app sat in a
+   permanent "no campaigns" state.
+2. The inventory builds its artwork from `benefitEdges.benefit.imageAssetURL` of
+   *currently listed* campaigns; with the campaign list empty, the lookup map was
+   empty too. Even with campaigns, only 2 of 111 history items resolved.
+
+Fixes:
+
+* **Web client id everywhere for GQL** (`renderer.js` pins `WEB_CLIENT_ID`, `main.js`
+  keeps it as the `buildHeaders` fallback) plus a one-time migration of a client id
+  already stored in `localStorage`:
+
+  ```js
+  if (accountTokens && accountTokens.clientId !== WEB_CLIENT_ID) {
+      accountTokens.clientId = WEB_CLIENT_ID;
+      localStorage.setItem('accountTokens', JSON.stringify(accountTokens));
+  }
+  ```
+
+* **Self-heal on missing data.** A null/absent `dropCampaigns` is now treated like
+  `INTEGRITY_REQUIRED` (rate limited to one refresh a minute), so the hidden
+  `twitch.tv/drops/inventory` window runs, the interceptor captures a fresh
+  `Client-Integrity` (and the web session's auth token), and the next poll succeeds:
+
+  ```js
+  const campaignDataMissing = !userData || userData.dropCampaigns == null;
+  if (campaignDataMissing && accountTokens && accountTokens.auth && Date.now() - lastIntegrityKick > 60000) {
+      lastIntegrityKick = Date.now();
+      window.electronAPI.refreshIntegrityToken();
+      showLoadingPlaceholder("Validating security token in background...");
+      return false;
+  }
+  ```
+
+  A device login also kicks that refresh straight away instead of waiting for the
+  next 30-second poll.
+
+* **Real artwork for every claimed drop.** `gameEventDrops` exposes its own image,
+  which the query did not ask for:
+
+  ```diff
+  -gameEventDrops { id name lastAwardedAt }
+  +gameEventDrops { id name lastAwardedAt imageURL }
+  ```
+
+  ```diff
+  -            image: itemImageMap.get(item.id) || null
+  +            image: item.imageURL || itemImageMap.get(item.id) || null
+  ```
+
+## 6. Update check (`main.js`, `preload.js`, `renderer.js`)
+
+The Settings view had a **Check Now** button, but it fetched upstream's
+`raw.githubusercontent.com/lokalizator-repo/TwitchDropsFarmer/main/package.json` and
+linked to upstream's releases. It now asks a main-process handler, because the GitHub
+API requires a `User-Agent` header that the renderer cannot set:
+
+```js
+ipcMain.handle('check-for-updates', ...)   // GET /repos/GamerNation12/Twitch-Drops-Farmer-Revived/releases/latest
+```
+
+It returns the current version (`app.getVersion()`), the latest tag, a semver
+comparison, the release URL, the download URL of the `.exe` asset and the notes. The
+renderer turns that into a clickable notice that opens the download directly, and runs
+the same check silently 8 s after launch and then every 6 hours.
+
+---
+
 ## Verified locally
 
 * Anonymous device request with the TV client returns a `user_code` (the web client
@@ -138,3 +231,10 @@ automatically.
 * The app's profile session was confirmed live against GQL
   (`currentUser` returned the account), which is what makes the hidden farm window
   count watch minutes.
+* Campaigns: **89 campaign cards** rendered after the client-id/integrity fix
+  (`campaignsContainer` no longer shows "No campaigns found."), with
+  `hasIntegrity: true, integrityLen: 500` in the request log and
+  `[IntegrityBot] Captured new integrity token successfully!`.
+* Inventory: **111 of 111 rows now render a real image** (previously 2 of 111, the
+  rest placeholders), all of them `static-cdn.jtvnw.net/twitch-quests-assets/...`
+  and all reported `complete && naturalWidth > 0` in the rendered DOM.
