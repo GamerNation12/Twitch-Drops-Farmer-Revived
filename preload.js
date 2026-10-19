@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimizeWindow: () => ipcRenderer.send('window-minimize'),
   toggleMaximizeWindow: () => ipcRenderer.invoke('window-maximize-toggle'),
   hideWindowToTray: () => ipcRenderer.send('window-close'),
+  quitApp: () => ipcRenderer.send('window-quit'),
 
   // WebSocket
   wsConnect: (userId, authToken) => ipcRenderer.invoke('ws-connect', userId, authToken),
@@ -52,6 +53,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   copyToClipboard: (text) => ipcRenderer.invoke('copy-to-clipboard', text),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  // Local patch: in-app updater (portable build swaps its own exe)
+  updateCapability: () => ipcRenderer.invoke('update-capability'),
+  downloadUpdate: (opts) => ipcRenderer.invoke('download-update', opts),
+  installUpdate: (opts) => ipcRenderer.invoke('install-update', opts),
+  onUpdateProgress: (callback) => ipcRenderer.on('update-progress', (_event, data) => callback(data)),
   getAutoLaunch: () => ipcRenderer.invoke('get-auto-launch'),
   setAutoLaunch: (opts) => ipcRenderer.invoke('set-auto-launch', opts)
 })

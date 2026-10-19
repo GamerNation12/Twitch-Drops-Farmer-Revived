@@ -1477,6 +1477,317 @@ input:checked + .slider:before {
   gap: 14px;
 }
 
+/* LOCAL PATCH: rebuilt inventory view -------------------------------------- */
+.inventory-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.inv-stat {
+  background: linear-gradient(180deg, rgba(20, 22, 32, 0.9), rgba(9, 10, 15, 0.9));
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.inv-stat:hover {
+  border-color: var(--border-hover);
+  transform: translateY(-1px);
+}
+
+.inv-stat-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1.15;
+  letter-spacing: -0.5px;
+}
+
+.inv-stat-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.inventory-section {
+  margin-bottom: 24px;
+}
+
+.inventory-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.inventory-section-count {
+  background: var(--accent-light);
+  color: var(--accent-hover);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+/* in-progress cards */
+.inventory-inprogress {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.inv-progress-card {
+  background: var(--bg-card);
+  border: 1px solid rgba(145, 70, 255, 0.22);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 0 0 1px rgba(145, 70, 255, 0.06) inset;
+}
+
+.inv-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.inv-progress-art {
+  width: 38px;
+  height: 50px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--border-color);
+  flex-shrink: 0;
+  background: var(--bg-tertiary);
+}
+
+.inv-progress-art.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.inv-progress-game {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inv-progress-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.inv-progress-pct {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--accent-hover);
+  flex-shrink: 0;
+}
+
+.inv-drop-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.inv-drop-name {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inv-drop-pct {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.inv-drop-pct.done {
+  color: var(--success);
+  font-weight: 700;
+}
+
+.inv-drop-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.inv-drop-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-color), var(--accent-hover));
+  transition: width 0.3s ease;
+}
+
+/* collected groups */
+.inventory-group {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  margin-bottom: 12px;
+  overflow: hidden;
+  transition: border-color 0.2s ease;
+}
+
+.inventory-group:hover {
+  border-color: rgba(145, 70, 255, 0.28);
+}
+
+.inventory-group-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  user-select: none;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.inventory-group-head:hover {
+  background: var(--bg-hover);
+}
+
+.inventory-group-art {
+  width: 40px;
+  height: 52px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--border-color);
+  flex-shrink: 0;
+  background: var(--bg-tertiary);
+}
+
+.inventory-group-art.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.inventory-group-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inventory-group-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.inventory-group-chevron {
+  color: var(--text-muted);
+  transition: transform 0.2s ease;
+  display: flex;
+}
+
+.inventory-group.collapsed .inventory-group-chevron {
+  transform: rotate(-90deg);
+}
+
+.inventory-group-body {
+  padding: 14px;
+  border-top: 1px solid var(--border-color);
+}
+
+.inventory-rewards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+}
+
+.inv-item {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+.inv-item:hover {
+  background: rgba(145, 70, 255, 0.1);
+  border-color: var(--border-hover);
+  transform: translateY(-2px);
+}
+
+.inv-item-img {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
+}
+
+.inv-item-img.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.inv-item-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.inv-item-date {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.inventory-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 46px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+}
+
 /* Hide native HTML number input spin arrows */
 input[type=number]::-webkit-inner-spin-button,
 input[type=number]::-webkit-outer-spin-button {
@@ -1788,4 +2099,88 @@ input[type=number] {
   padding: 9px 18px;
   font-size: 13px;
   font-weight: 700;
+}
+
+.update-progress {
+  margin-top: 16px;
+}
+
+.update-progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+
+.update-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-color), var(--accent-hover));
+  box-shadow: 0 0 12px rgba(145, 70, 255, 0.5);
+  transition: width 0.25s ease;
+}
+
+.update-progress-text {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* LOCAL PATCH: scrollbars + focus polish so the app feels less "web page" */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(145, 70, 255, 0.45) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(145, 70, 255, 0.35);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(145, 70, 255, 0.6);
+  background-clip: content-box;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgba(145, 70, 255, 0.65);
+  outline-offset: 2px;
+}
+
+/* Smoother view switches and cards */
+#viewDashboard,
+#viewCampaigns,
+#viewInventory,
+#viewSettings {
+  animation: viewFadeIn 0.22s ease;
+}
+
+@keyframes viewFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #viewDashboard,
+  #viewCampaigns,
+  #viewInventory,
+  #viewSettings {
+    animation: none;
+  }
 }

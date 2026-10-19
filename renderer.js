@@ -545,6 +545,10 @@ if (btnHidePaid) {
 
 let activeLogFilter = 'all';
 
+// LOCAL PATCH: cap the console list so a multi-day farming session cannot grow
+// the DOM (and the renderer's memory) without bound.
+const MAX_LOG_ENTRIES = 500;
+
 function addLog(msg, type = 'info') {
     console.log(`[RendererLog] ${type.toUpperCase()}: ${msg}`);
     const consoleEl = getEl('logConsole');
@@ -571,6 +575,13 @@ function addLog(msg, type = 'info') {
     }
 
     consoleEl.appendChild(entry);
+
+    // LOCAL PATCH: keep the console DOM bounded - a long farming session used to
+    // grow this list forever (and every node costs memory and re-layout time).
+    while (consoleEl.childElementCount > MAX_LOG_ENTRIES) {
+        consoleEl.removeChild(consoleEl.firstElementChild);
+    }
+
     consoleEl.scrollTop = consoleEl.scrollHeight;
 }
 
@@ -642,7 +653,15 @@ function switchView(viewName) {
             renderCampaignsListItems();
         }
         if (viewName === 'inventory' && viewInventory) { viewInventory.style.display = 'block'; btnNavInventory.classList.add('active'); renderInventory(); }
-        if (viewName === 'settings' && viewSettings) { viewSettings.style.display = 'block'; btnNavSettings.classList.add('active'); }
+        if (viewName === 'settings' && viewSettings) {
+            viewSettings.style.display = 'block';
+            btnNavSettings.classList.add('active');
+            // The priority list is only re-rendered while this view is open, so
+            // refresh it on the way in (it used to be rebuilt every 30s even
+            // when nobody was looking at it).
+            renderPriorityChips();
+            renderPriorityGrid(autoFarmSearch ? autoFarmSearch.value : '');
+        }
         if (viewName === 'logs' && viewLogs) { viewLogs.style.display = 'block'; btnNavLogs.classList.add('active'); }
     } catch (e) {
         console.error("View switch error:", e);
@@ -727,13 +746,14 @@ function updateStartupSettingsUI() {
         toggleAutoLaunchHidden.checked = autoLaunchEnabled && autoLaunchHidden;
         toggleAutoLaunchHidden.disabled = !autoLaunchEnabled;
     }
-    if (toggleAutoStartFarm) {
-        toggleAutoStartFarm.checked = autoLaunchEnabled && autoStartFarm;
-        toggleAutoStartFarm.disabled = !autoLaunchEnabled;
-    }
+
+    // LOCAL PATCH: "start farming when the app opens" is its own setting - it no
+    // longer requires "launch with Windows", which used to be the only way to
+    // get it and made it look disabled for everybody else.
+    if (toggleAutoStartFarm) toggleAutoStartFarm.checked = !!autoStartFarm;
     if (autoStartFarmModeSelect) {
         autoStartFarmModeSelect.value = autoStartFarmMode;
-        autoStartFarmModeSelect.disabled = !autoLaunchEnabled;
+        autoStartFarmModeSelect.disabled = !autoStartFarm;
     }
 
     if (subGroup) {
@@ -747,13 +767,12 @@ function updateStartupSettingsUI() {
 
 function syncAutoLaunchConfig() {
     const hiddenState = autoLaunchEnabled && autoLaunchHidden;
-    const farmState = autoLaunchEnabled && autoStartFarm;
 
     if (window.electronAPI && window.electronAPI.setAutoLaunch) {
         window.electronAPI.setAutoLaunch({
             autoLaunchEnabled,
             autoLaunchHidden: hiddenState,
-            autoStartFarm: farmState,
+            autoStartFarm,          // independent of the Windows auto-launch now
             autoStartFarmMode
         });
     }
@@ -765,9 +784,13 @@ if (window.electronAPI && window.electronAPI.getAutoLaunch) {
         if (cfg) {
             autoLaunchEnabled = !!cfg.autoLaunchEnabled;
             autoLaunchHidden = autoLaunchEnabled && !!cfg.autoLaunchHidden;
-            autoStartFarm = autoLaunchEnabled && !!cfg.autoStartFarm;
+            // Independent of "launch with Windows"; ON unless explicitly turned off.
+            autoStartFarm = typeof cfg.autoStartFarm === 'boolean' ? cfg.autoStartFarm : true;
             autoStartFarmMode = cfg.autoStartFarmMode || 'priority';
             updateStartupSettingsUI();
+            // If the account is already connected when the config lands, don't
+            // wait for another token event before starting to farm.
+            if (accountTokens && accountTokens.auth) triggerAutoStartFarm();
         }
     }).catch(e => console.error("Error loading auto launch config from main:", e));
 }
@@ -803,18 +826,18 @@ if (toggleAutoLaunchHiddenEl) {
 const toggleAutoStartFarmEl = document.getElementById('toggleAutoStartFarm');
 if (toggleAutoStartFarmEl) {
     toggleAutoStartFarmEl.addEventListener('change', () => {
-        if (!autoLaunchEnabled) return;
         autoStartFarm = toggleAutoStartFarmEl.checked;
+        updateStartupSettingsUI();
         syncAutoLaunchConfig();
         showToast(`Auto-Start Farming ${autoStartFarm ? 'enabled' : 'disabled'}`, 'info');
         addLog(`Auto-Start Farming on launch set to ${autoStartFarm ? 'ENABLED' : 'DISABLED'}`, 'system');
+        if (autoStartFarm) triggerAutoStartFarm();
     });
 }
 
 const autoStartFarmModeSelectEl = document.getElementById('autoStartFarmModeSelect');
 if (autoStartFarmModeSelectEl) {
     autoStartFarmModeSelectEl.addEventListener('change', () => {
-        if (!autoLaunchEnabled) return;
         autoStartFarmMode = autoStartFarmModeSelectEl.value;
         farmAllMode = (autoStartFarmMode === 'global');
         localStorage.setItem('farmAllMode', farmAllMode ? 'true' : 'false');
@@ -827,21 +850,32 @@ if (autoStartFarmModeSelectEl) {
 
 function triggerAutoStartFarm() {
     if (hasAutoStartedFarm) return;
-    if (!autoLaunchEnabled || !autoStartFarm) return;
+    if (!autoStartFarm) return;
     if (!accountTokens || !accountTokens.auth) {
         addLog(`[Startup] Auto-start farming skipped: Not logged in.`, 'system');
         return;
     }
 
     hasAutoStartedFarm = true;
-    farmAllMode = (autoStartFarmMode === 'global');
+
+    // Priority mode farms the list in order; if the list is empty there is
+    // nothing to farm, so fall back to Global instead of idling.
+    const savedCount = (localStorage.getItem('autoFarmGames') || '')
+        .split(',').map(s => s.trim()).filter(Boolean).length;
+    let mode = autoStartFarmMode;
+    if (mode === 'priority' && savedCount === 0) {
+        mode = 'global';
+        addLog('[Startup] Your priority list is empty — auto-starting in GLOBAL mode.', 'system');
+    }
+
+    farmAllMode = (mode === 'global');
     localStorage.setItem('farmAllMode', farmAllMode ? 'true' : 'false');
     masterAutoFarmEnabled = true;
     activeFarmingCampaignId = null;
     manualOverrideId = null;
 
-    addLog(`🚀 [Startup] Auto-start farming triggered automatically in ${autoStartFarmMode.toUpperCase()} mode.`, 'system');
-    showToast(`Auto-Start Farming (${autoStartFarmMode.toUpperCase()})`, 'success');
+    addLog(`🚀 [Startup] Auto-start farming triggered automatically in ${mode.toUpperCase()} mode.`, 'system');
+    showToast(`Auto-Start Farming (${mode.toUpperCase()})`, 'success');
     updateMasterAutoFarmUI();
     runMasterFarmLoop();
 }
@@ -1058,8 +1092,12 @@ if (btnWinToTray) {
 
 const btnWinClose = document.getElementById('btnWinClose');
 if (btnWinClose) {
-    // Same as before: hides to the tray so farming keeps running.
-    btnWinClose.onclick = () => window.electronAPI.hideWindowToTray();
+    // LOCAL PATCH: X now really closes the app. "Background" is the button that
+    // keeps farming alive in the tray.
+    btnWinClose.onclick = () => {
+        if (masterAutoFarmEnabled) addLog('Closing the app and stopping the farm.', 'system');
+        window.electronAPI.quitApp();
+    };
 }
 
 // LOCAL PATCH: the header version badge was a hardcoded "v1.3" in index.html,
@@ -1198,6 +1236,13 @@ function showUpdateModal(info) {
         skip.checked = isUpdate && dismissedUpdateVersion() === String(info.latestVersion);
     }
 
+    // Progress UI resets every time the modal opens.
+    const progressWrap = document.getElementById('updateProgressWrap');
+    const progressFill = document.getElementById('updateProgressFill');
+    const progressText = document.getElementById('updateProgressText');
+    if (progressWrap) progressWrap.style.display = 'none';
+    if (progressFill) progressFill.style.width = '0%';
+
     const close = () => {
         if (skip && isUpdate) {
             if (skip.checked) dismissUpdateVersion(String(info.latestVersion));
@@ -1214,14 +1259,75 @@ function showUpdateModal(info) {
         btnLater.onclick = close;
     }
 
+    // LOCAL PATCH: the update button now downloads the new build in the app and
+    // installs it (no browser trip) whenever this build can replace itself - a
+    // portable exe swapping its own file, or an installed build running the new
+    // Setup silently. Otherwise it falls back to the release page.
     const btnDownload = document.getElementById('btnUpdateDownload');
-    if (btnDownload) {
-        btnDownload.innerText = isUpdate ? `Download v${info.latestVersion}` : 'Open release page';
+    if (btnDownload && isUpdate) {
+        window.electronAPI.updateCapability().then(cap => {
+            btnDownload.innerText = cap && cap.canSelfUpdate
+                ? `Update to v${info.latestVersion} & restart`
+                : `Download v${info.latestVersion}`;
+        }).catch(() => { btnDownload.innerText = `Download v${info.latestVersion}`; });
+
+        btnDownload.onclick = async () => {
+            if (btnDownload.disabled) return;
+            btnDownload.disabled = true;
+            btnLater.disabled = true;
+
+            const cap = await window.electronAPI.updateCapability().catch(() => null);
+            if (!cap || !cap.canSelfUpdate) {
+                window.electronAPI.openExternal(info.downloadUrl || info.releaseUrl);
+                addLog(`[Updates] Opened the download for v${info.latestVersion} in your browser.`, 'system');
+                btnDownload.disabled = false;
+                btnLater.disabled = false;
+                close();
+                return;
+            }
+
+            if (progressWrap) progressWrap.style.display = 'block';
+            if (progressText) progressText.innerText = 'Downloading… 0%';
+            btnDownload.innerText = 'Downloading…';
+
+            const res = await window.electronAPI.downloadUpdate({
+                url: info.downloadUrl || info.releaseUrl,
+                version: info.latestVersion,
+                digest: info.digest || null
+            });
+
+            if (!res || !res.ok) {
+                if (progressText) progressText.innerText = (res && res.error) || 'Download failed.';
+                btnDownload.innerText = 'Try again';
+                btnDownload.disabled = false;
+                btnLater.disabled = false;
+                addLog(`[Updates] Download failed: ${(res && res.error) || 'unknown error'}`, 'error');
+                return;
+            }
+
+            if (progressFill) progressFill.style.width = '100%';
+            if (progressText) progressText.innerText = 'Installing and restarting…';
+            btnDownload.innerText = 'Installing…';
+            addLog(`[Updates] Downloaded v${info.latestVersion}. ${cap.mode === 'installed' ? 'Running the installer' : 'Replacing the app'} and restarting…`, 'system');
+
+            const installed = await window.electronAPI.installUpdate({ path: res.path, version: info.latestVersion, digest: info.digest || null });
+            if (!installed || !installed.ok) {
+                if (progressText) progressText.innerText = (installed && installed.error) || 'Could not install the update.';
+                addLog(`[Updates] Install failed: ${(installed && installed.error) || 'unknown error'}`, 'error');
+                window.electronAPI.openExternal(info.downloadUrl || info.releaseUrl);
+                btnDownload.innerText = 'Download instead';
+                btnDownload.disabled = false;
+                btnLater.disabled = false;
+                return;
+            }
+            // The main process quits and relaunches us in a second or two.
+            if (progressText) progressText.innerText = 'Restarting the app…';
+        };
+    } else if (btnDownload) {
+        btnDownload.innerText = 'Open release page';
         btnDownload.onclick = () => {
-            window.electronAPI.openExternal(info.downloadUrl || info.releaseUrl);
-            addLog(isUpdate
-                ? `[Updates] Opened the download for v${info.latestVersion}.`
-                : `[Updates] Opened the release page for v${info.currentVersion}.`, 'system');
+            window.electronAPI.openExternal(info.releaseUrl || info.downloadUrl);
+            addLog(`[Updates] Opened the release page for v${info.currentVersion}.`, 'system');
             close();
         };
     }
@@ -1231,6 +1337,21 @@ function showUpdateModal(info) {
 
     modal.style.display = 'flex';
     if (skip && isUpdate) skip.focus();
+}
+
+// Progress events streamed from the main process while the update downloads.
+if (window.electronAPI && window.electronAPI.onUpdateProgress) {
+    window.electronAPI.onUpdateProgress((data) => {
+        const fill = document.getElementById('updateProgressFill');
+        const text = document.getElementById('updateProgressText');
+        if (fill && data && typeof data.percent === 'number') fill.style.width = `${data.percent}%`;
+        if (text && data) {
+            const mb = (n) => (n / (1024 * 1024)).toFixed(1);
+            text.innerText = data.total
+                ? `Downloading… ${data.percent}% (${mb(data.received)} / ${mb(data.total)} MB)`
+                : `Downloading… ${mb(data.received)} MB`;
+        }
+    });
 }
 
 async function checkUpdates(silent = false) {
@@ -2250,8 +2371,12 @@ async function fetchAndUpdateCampaigns() {
 
         applyCurrentFilters();
         setupCampaignsListEvents();
-        renderPriorityChips();
-        renderPriorityGrid(autoFarmSearch ? autoFarmSearch.value : '');
+        // LOCAL PATCH: only rebuild the settings priority widgets while the
+        // settings view is actually open; switchView() re-renders them.
+        if (viewSettings && viewSettings.style.display !== 'none') {
+            renderPriorityChips();
+            renderPriorityGrid(autoFarmSearch ? autoFarmSearch.value : '');
+        }
 
         const farmPanel = document.getElementById('farmPanel');
         if (farmPanel && allCampaigns.length > 0) {
@@ -2644,7 +2769,10 @@ async function processTokens(tokens, fromStorage = false) {
         campaignsContainer.innerHTML = '<p style="color: var(--text-secondary);">No active campaigns found.</p>';
         renderIdlePlaceholder();
     }
-    farmingInterval = setInterval(fetchAndUpdateCampaigns, 30000);
+    // LOCAL PATCH: was every 30s. The campaign list rarely changes that fast and
+    // each refresh is a full GQL round-trip, so 45s keeps the UI fresh with a
+    // third less network/CPU churn.
+    farmingInterval = setInterval(fetchAndUpdateCampaigns, 45000);
     triggerAutoStartFarm();
 }
 
@@ -2853,6 +2981,11 @@ function renderCampaignsListItems() {
 
     const statsCount = document.getElementById('statsCampaignsCount');
     if (statsCount) statsCount.innerText = filteredCampaigns.length;
+
+    // LOCAL PATCH: building ~90 campaign cards is the most expensive thing this
+    // app does on a timer, and nobody sees it while another view is open. The
+    // stats above still update; switchView() re-renders on the way in.
+    if (campaignsContainer.offsetParent === null) return;
 
     const savedList = (localStorage.getItem('autoFarmGames') || '').split(',').map(s => s.trim().toLowerCase());
 
@@ -3629,11 +3762,14 @@ if (btnMinimizeTray) {
     };
 }
 
-// Inventory Search
+// Inventory Search / Sort
 let inventorySearchQuery = '';
+let inventorySortMode = localStorage.getItem('inventorySortMode') || 'recent';
+const collapsedInventoryGroups = new Set();
 
 const inventorySearchInput = getEl('inventorySearch');
 const btnClearInventorySearch = getEl('btnClearInventorySearch');
+const inventorySortSelect = getEl('inventorySort');
 
 if (inventorySearchInput) {
     inventorySearchInput.oninput = (e) => {
@@ -3652,6 +3788,32 @@ if (btnClearInventorySearch) {
     };
 }
 
+if (inventorySortSelect) {
+    inventorySortSelect.value = inventorySortMode;
+    inventorySortSelect.onchange = () => {
+        inventorySortMode = inventorySortSelect.value;
+        localStorage.setItem('inventorySortMode', inventorySortMode);
+        renderInventory();
+    };
+}
+
+// Expand / collapse a game group without re-rendering everything.
+function toggleInventoryGroup(gameName, headerEl) {
+    const key = decodeURIComponent(gameName);
+    const group = headerEl && headerEl.closest('.inventory-group');
+    const body = group && group.querySelector('.inventory-group-body');
+    if (!body) return;
+    if (collapsedInventoryGroups.has(key)) {
+        collapsedInventoryGroups.delete(key);
+        body.style.display = '';
+        group.classList.remove('collapsed');
+    } else {
+        collapsedInventoryGroups.add(key);
+        body.style.display = 'none';
+        group.classList.add('collapsed');
+    }
+}
+
 async function renderInventory() {
     const container = document.getElementById('inventoryContainer');
     if (!container) return;
@@ -3661,6 +3823,8 @@ async function renderInventory() {
         return;
     }
 
+    container.innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-secondary);"><div class="spinner-sm" style="width:26px;height:26px;border-width:3px;margin:0 auto 12px;border-top-color:var(--accent-color);"></div>Loading your rewards…</div>';
+
     const res = await window.electronAPI.getInventory(accountTokens);
     if (res && res.error === 'AUTH_EXPIRED') {
         handleAuthExpired();
@@ -3668,11 +3832,6 @@ async function renderInventory() {
     }
     const inProgress = res?.data?.currentUser?.inventory?.dropCampaignsInProgress || [];
     const history = res?.data?.currentUser?.inventory?.gameEventDrops || [];
-
-    if (history.length === 0) {
-        container.innerHTML = '<div style="text-align:center; padding:40px; color:var(--text-secondary);">No claimed drops found in your history.</div>';
-        return;
-    }
 
     const itemImageMap = new Map();
     const allKnownCampaigns = [...allCampaigns, ...inProgress];
@@ -3731,62 +3890,147 @@ async function renderInventory() {
     });
 
     const sortedGroupNames = Object.keys(groups).sort((a, b) => {
+        if (inventorySortMode === 'game') return a.localeCompare(b);
+        if (inventorySortMode === 'count') return groups[b].rewards.length - groups[a].rewards.length;
         const otherName = "Other Rewards";
         if (a === otherName && b !== otherName) return 1;
         if (a !== otherName && b === otherName) return -1;
         return groups[b].maxDate - groups[a].maxDate;
     });
 
-    if (sortedGroupNames.length === 0 && inventorySearchQuery) {
-        container.innerHTML = `<div style="text-align:center; padding:40px; color:var(--text-secondary);">No rewards matching "${inventorySearchQuery}".</div>`;
-        return;
-    }
+    const visibleRewardCount = sortedGroupNames.reduce((sum, gn) => sum + groups[gn].rewards.length, 0);
 
-    const panelsHtml = sortedGroupNames.map(gn => {
-        const group = groups[gn];
-        const rewardsSorted = group.rewards.sort((a, b) => new Date(b.lastAwardedAt) - new Date(a.lastAwardedAt));
+    // ---- summary strip -------------------------------------------------
+    const newest = sortedGroupNames.length
+        ? sortedGroupNames.reduce((max, gn) => (groups[gn].maxDate > max ? groups[gn].maxDate : max), new Date(0))
+        : null;
+    const prettyDate = (d) => d ? d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
-        const rewardsHtml = rewardsSorted.map(r => {
-            const d = new Date(r.lastAwardedAt);
-            const dateStr = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getFullYear()).slice(-2)}`;
-            const itemIcon = r.image
-                ? `<img src="${r.image}" style="width: 44px; height: 44px; border-radius: 8px; object-fit: contain; background: rgba(0,0,0,0.3); margin-bottom: 6px;">`
-                : `<div style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); background: rgba(255,255,255,0.05); border-radius: 8px; margin-bottom: 6px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12V22H4V12"/><rect x="2" y="7" width="20" height="5" rx="1"/></svg></div>`;
+    const summaryHtml = `
+        <div class="inventory-summary">
+            <div class="inv-stat"><span class="inv-stat-value">${visibleRewardCount}</span><span class="inv-stat-label">${inventorySearchQuery ? 'Matching rewards' : 'Rewards collected'}</span></div>
+            <div class="inv-stat"><span class="inv-stat-value">${sortedGroupNames.length}</span><span class="inv-stat-label">${sortedGroupNames.length === 1 ? 'Game group' : 'Game groups'}</span></div>
+            <div class="inv-stat"><span class="inv-stat-value">${inProgress.length}</span><span class="inv-stat-label">In progress</span></div>
+            <div class="inv-stat"><span class="inv-stat-value" style="font-size:15px;">${prettyDate(newest)}</span><span class="inv-stat-label">Newest drop</span></div>
+        </div>
+    `;
 
+    // ---- in-progress section ------------------------------------------
+    const inProgressHtml = inProgress.length ? `
+        <div class="inventory-section">
+            <div class="inventory-section-title">
+                ${ICONS.zap ? ICONS.zap(14) : ''} In Progress
+                <span class="inventory-section-count">${inProgress.length}</span>
+            </div>
+            <div class="inventory-inprogress">
+                ${inProgress.map(c => {
+                    const gameName = c.game?.displayName || 'Unknown game';
+                    const art = getGameImageUrl(c.game, 60, 80);
+                    const drops = c.timeBasedDrops || [];
+                    const total = drops.length;
+                    const done = drops.filter(d => d.self?.isClaimed).length;
+                    const pct = total ? Math.round((done / total) * 100) : 0;
+                    const watchRows = drops.slice(0, 4).map(d => {
+                        const req = d.requiredMinutesWatched || 0;
+                        const cur = Math.min(d.self?.currentMinutesWatched || 0, req);
+                        const p = req ? Math.round((cur / req) * 100) : 0;
+                        const claimed = d.self?.isClaimed;
+                        return `
+                            <div class="inv-drop">
+                                <div class="inv-drop-top">
+                                    <span class="inv-drop-name" title="${escapeHtml(d.name || '')}">${escapeHtml(d.name || 'Reward')}</span>
+                                    <span class="inv-drop-pct ${claimed ? 'done' : ''}">${claimed ? '✓ claimed' : `${cur}/${req}m`}</span>
+                                </div>
+                                <div class="inv-drop-bar"><div class="inv-drop-fill" style="width:${claimed ? 100 : p}%"></div></div>
+                            </div>
+                        `;
+                    }).join('');
+                    return `
+                        <div class="inv-progress-card">
+                            <div class="inv-progress-head">
+                                ${art
+                                    ? `<img class="inv-progress-art" loading="lazy" decoding="async" src="${art}" alt="">`
+                                    : `<div class="inv-progress-art placeholder">${ICONS.gamepad ? ICONS.gamepad(20) : ''}</div>`}
+                                <div style="min-width:0; flex:1;">
+                                    <div class="inv-progress-game" title="${escapeHtml(gameName)}">${escapeHtml(gameName)}</div>
+                                    <div class="inv-progress-sub">${done}/${total} drops claimed</div>
+                                </div>
+                                <div class="inv-progress-pct">${pct}%</div>
+                            </div>
+                            ${watchRows}
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+    ` : '';
+
+    // ---- history --------------------------------------------------------
+    let historyHtml = '';
+    if (!history.length) {
+        historyHtml = `<div class="inventory-empty">${ICONS.gift ? ICONS.gift(30) : ''}<div style="margin-top:10px;">No claimed drops yet — they will appear here as soon as Twitch credits your first reward.</div></div>`;
+    } else if (sortedGroupNames.length === 0) {
+        historyHtml = `<div class="inventory-empty">No rewards match “${escapeHtml(inventorySearchQuery)}”.</div>`;
+    } else {
+        historyHtml = sortedGroupNames.map(gn => {
+            const group = groups[gn];
+            const rewardsSorted = [...group.rewards].sort((a, b) => {
+                if (inventorySortMode === 'name') return String(a.name).localeCompare(String(b.name));
+                return new Date(b.lastAwardedAt) - new Date(a.lastAwardedAt);
+            });
+            const isCollapsed = collapsedInventoryGroups.has(gn);
+
+            const rewardsHtml = rewardsSorted.map(r => {
+                const d = new Date(r.lastAwardedAt);
+                const dateStr = isNaN(d) ? '—' : d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+                const itemIcon = r.image
+                    ? `<img class="inv-item-img" loading="lazy" decoding="async" src="${r.image}" alt="">`
+                    : `<div class="inv-item-img placeholder">${ICONS.gift ? ICONS.gift(20) : '🎁'}</div>`;
+
+                return `
+                    <div class="inv-item" title="${escapeHtml(r.name || '')} — collected ${dateStr}">
+                        ${itemIcon}
+                        <div class="inv-item-name">${escapeHtml(r.name || 'Reward')}</div>
+                        <div class="inv-item-date">${dateStr}</div>
+                    </div>
+                `;
+            }).join('');
+
+            const encodedName = encodeURIComponent(gn);
             return `
-                <div class="drop-item-row" style="margin-bottom: 0;">
-                    ${itemIcon}
-                    <div class="drop-info">
-                        <h4>${r.name}</h4>
-                        <div style="font-size: 11px; color: var(--text-secondary);">${dateStr}</div>
+                <div class="inventory-group ${isCollapsed ? 'collapsed' : ''}" data-group="${encodedName}">
+                    <div class="inventory-group-head">
+                        ${group.img
+                            ? `<img class="inventory-group-art" loading="lazy" decoding="async" src="${group.img}" alt="">`
+                            : `<div class="inventory-group-art placeholder">${ICONS.gamepad ? ICONS.gamepad(22) : ''}</div>`}
+                        <div style="min-width:0; flex:1;">
+                            <div class="inventory-group-name">${escapeHtml(gn)}</div>
+                            <div class="inventory-group-sub">${group.rewards.length} drop${group.rewards.length === 1 ? '' : 's'} · newest ${prettyDate(group.maxDate)}</div>
+                        </div>
+                        <span class="inventory-group-chevron">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                        </span>
+                    </div>
+                    <div class="inventory-group-body" style="${isCollapsed ? 'display:none;' : ''}">
+                        <div class="inventory-rewards">${rewardsHtml}</div>
                     </div>
                 </div>
             `;
         }).join('');
+    }
 
-        const gameCover = group.img
-            ? `<img src="${group.img}" style="width: 44px; height: 58px; border-radius: 8px; object-fit: cover; border: 1px solid var(--border-color);">`
-            : `<div style="width: 44px; height: 58px; background: var(--bg-tertiary); border-radius: 8px; display: flex; align-items: center; justify-content: center;">${ICONS.gamepad(22)}</div>`;
+    container.innerHTML = summaryHtml + inProgressHtml + `<div class="inventory-section">${sortedGroupNames.length ? `<div class="inventory-section-title">${ICONS.gift ? ICONS.gift(14) : ''} Collected <span class="inventory-section-count">${visibleRewardCount}</span></div>` : ''}${historyHtml}</div>`;
 
-        return `
-            <div class="farm-panel settings-panel" style="margin-bottom: 20px; width: 100%; display: flex; flex-direction: column; gap: 14px;">
-                <div style="display: flex; gap: 14px; align-items: center;">
-                    ${gameCover}
-                    <div>
-                        <h3 style="margin: 0; font-size: 16px; color: white; font-weight: 800;">${gn}</h3>
-                        <p style="margin: 2px 0 0; font-size: 12px; color: var(--text-secondary);">
-                           Collected ${group.rewards.length} Drops
-                        </p>
-                    </div>
-                </div>
-                <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
-                    ${rewardsHtml}
-                </div>
-            </div>
-        `;
-    }).join('');
+    // Real listeners instead of inline handlers: game names can contain quotes.
+    container.querySelectorAll('.inventory-group').forEach(g => {
+        const head = g.querySelector('.inventory-group-head');
+        if (head) head.addEventListener('click', () => toggleInventoryGroup(g.dataset.group, head));
+    });
 
-    container.innerHTML = panelsHtml;
+    // A dead artwork URL just leaves the tile blank instead of a broken icon.
+    container.querySelectorAll('img').forEach(img => {
+        img.addEventListener('error', () => { img.style.visibility = 'hidden'; }, { once: true });
+    });
 }
 
 function renderIdlePlaceholder() {

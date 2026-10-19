@@ -1,6 +1,9 @@
 const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage, shell, clipboard } = require('electron')
 const path = require('node:path')
 const fs = require('fs')
+const { spawn } = require('node:child_process')
+const { Readable } = require('node:stream')
+const crypto = require('node:crypto')
 
 ipcMain.on('open-external', (event, url) => {
   shell.openExternal(url);
@@ -141,7 +144,7 @@ ipcMain.handle('window-maximize-toggle', () => {
   return true;
 });
 
-// Same behaviour as the X button always had: hide to the tray, keep farming.
+// The labelled "Background" button: hide to the tray, keep farming.
 ipcMain.on('window-close', () => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
   // Windows: tell the user where the app went, once per run.
@@ -150,10 +153,18 @@ ipcMain.on('window-close', () => {
     try {
       tray.displayBalloon({
         title: `${BRAND_NAME} is still running`,
-        content: 'Minimized to the tray - farming continues. Click the tray icon to reopen, or right-click it to quit.'
+        content: 'Moved to the tray - farming continues. Click the tray icon to reopen, or right-click it to quit.'
       });
     } catch (e) { /* balloons are best-effort */ }
   }
+});
+
+// LOCAL PATCH: the X button (and Alt+F4 / the taskbar's Close) really quits the
+// app now. It used to hide to the tray, which made the X look broken - keeping
+// the app alive in the background is what the "Background" button is for.
+ipcMain.on('window-quit', () => {
+  isQuitting = true;
+  app.quit();
 });
 
 const configPath = path.join(app.getPath('userData'), 'app-config.json');
@@ -178,14 +189,28 @@ ipcMain.handle('get-auto-launch', () => {
   try {
     const settings = app.getLoginItemSettings();
     const config = loadConfig();
+
+    // One-time migration: older builds forced this off unless "launch with
+    // Windows" was enabled, so every existing install has false saved even
+    // though the user never turned it off. Flip it on once, then respect the
+    // user's choice from then on.
+    let autoStartFarm = typeof config.autoStartFarm === 'boolean' ? config.autoStartFarm : true;
+    if (config.autoStartFarmMigrated !== true) {
+      autoStartFarm = true;
+      saveConfig({ autoStartFarmMigrated: true, autoStartFarm: true });
+    }
+
     return {
       autoLaunchEnabled: typeof config.autoLaunchEnabled === 'boolean' ? config.autoLaunchEnabled : settings.openAtLogin,
       autoLaunchHidden: typeof config.autoLaunchHidden === 'boolean' ? config.autoLaunchHidden : settings.openAsHidden,
-      autoStartFarm: typeof config.autoStartFarm === 'boolean' ? config.autoStartFarm : false,
+      // LOCAL PATCH: farming on launch is its own setting now (it used to be
+      // locked behind "launch with Windows") and defaults to ON, so a fresh
+      // install starts working through the priority list by itself.
+      autoStartFarm,
       autoStartFarmMode: config.autoStartFarmMode || 'priority'
     };
   } catch (e) {
-    return { autoLaunchEnabled: false, autoLaunchHidden: false, autoStartFarm: false, autoStartFarmMode: 'priority' };
+    return { autoLaunchEnabled: false, autoLaunchHidden: false, autoStartFarm: true, autoStartFarmMode: 'priority' };
   }
 });
 
@@ -195,7 +220,8 @@ ipcMain.handle('set-auto-launch', (event, cfg) => {
       autoLaunchEnabled: !!cfg.autoLaunchEnabled,
       autoLaunchHidden: !!cfg.autoLaunchHidden,
       autoStartFarm: !!cfg.autoStartFarm,
-      autoStartFarmMode: cfg.autoStartFarmMode || 'priority'
+      autoStartFarmMode: cfg.autoStartFarmMode || 'priority',
+      autoStartFarmMigrated: true
     });
 
     const opts = {
@@ -231,7 +257,12 @@ const createWindow = () => {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       enableRemoteModule: false,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // LOCAL PATCH: the farming loop, campaign refresh and auto-claim live in
+      // this renderer, and the window is expected to spend its life hidden in
+      // the tray. Without this Chromium throttles those timers to about once a
+      // minute and "farming in the background" crawls.
+      backgroundThrottling: false
     },
     titleBarStyle: 'hidden',
     backgroundColor: '#0e0e10',
@@ -256,16 +287,14 @@ const createWindow = () => {
     }
   }, 2000)
 
-  // LOCAL PATCH: the old code intercepted 'minimize' and hid the window to the
-  // tray instead, which made clicking the taskbar icon look like the app had
-  // closed into the background. Minimising now behaves like any other window:
-  // the app stays in the taskbar and clicking its icon brings it back. Use the
-  // header's X button (or Settings > Minimize to tray) to hide it to the tray.
-  mainWindow.on('close', (event) => {
-    if (!isQuitting) {
-      event.preventDefault();
-      mainWindow.hide();
-    }
+  // LOCAL PATCH: minimising behaves like any other window (stays in the
+  // taskbar). Closing really closes: the header's X quits the app, and the
+  // separate "Background" button hides it to the tray while farming continues.
+  // app.quit() is explicit here because the hidden farm/claim windows would
+  // otherwise keep the process alive after the main window is gone.
+  mainWindow.on('close', () => {
+    isQuitting = true;
+    setImmediate(() => app.quit());
   });
 
   mainWindow.loadFile('index.html')
@@ -430,7 +459,13 @@ ipcMain.handle('check-for-updates', async () => {
 
     const release = await res.json();
     const latestVersion = String(release.tag_name || release.name || '').replace(/^v/i, '');
-    const asset = (release.assets || []).find((a) => /\.exe$/i.test(a.name));
+    // Releases carry two exes: the portable one and the NSIS Setup. Pick the one
+    // this build can actually use (see updateMode()).
+    const exeAssets = (release.assets || []).filter((a) => /\.exe$/i.test(a.name));
+    const setupAsset = exeAssets.find((a) => /setup/i.test(a.name));
+    const portableAsset = exeAssets.find((a) => !/setup/i.test(a.name));
+    const wantInstaller = updateMode().mode === 'installed';
+    const asset = (wantInstaller ? setupAsset || portableAsset : portableAsset || setupAsset);
 
     return {
       currentVersion,
@@ -438,11 +473,302 @@ ipcMain.handle('check-for-updates', async () => {
       hasUpdate: semverNewer(latestVersion, currentVersion),
       releaseUrl: release.html_url,
       downloadUrl: asset ? asset.browser_download_url : release.html_url,
+      // GitHub publishes sha256:<hex> for release assets; the updater verifies
+      // the download against it before touching the installed exe.
+      digest: (asset && asset.digest) || null,
+      assetSize: (asset && asset.size) || null,
+      assetName: (asset && asset.name) || null,
+      isInstaller: !!(asset && /setup/i.test(asset.name)),
       notes: String(release.body || '').slice(0, 4000),
       publishedAt: release.published_at
     };
   } catch (e) {
     return { currentVersion, error: (e && e.message) || 'network error' };
+  }
+});
+
+// LOCAL PATCH: in-app updater -------------------------------------------------
+// Two kinds of build ship from this repo and they update differently:
+//
+//  - Portable exe: electron-builder's `portable` target runs the app from a temp
+//    folder, so `process.execPath` is useless. It hands us the file the user
+//    actually double-clicked via PORTABLE_EXECUTABLE_FILE: download the new
+//    portable exe, wait for this process to exit, copy it over that file.
+//  - Installed build (NSIS Setup): `process.execPath` is the real installed exe,
+//    so updating means running the new Setup silently and relaunching.
+function updateMode() {
+  const portable = process.env.PORTABLE_EXECUTABLE_FILE;
+  if (portable) return { mode: 'portable', target: portable };
+  if (app.isPackaged) return { mode: 'installed', target: process.execPath };
+  return { mode: 'none', target: null };
+}
+
+ipcMain.handle('update-capability', () => {
+  const { mode, target } = updateMode();
+  return {
+    canSelfUpdate: mode !== 'none',
+    mode,
+    target: mode === 'none' ? null : target,
+    version: app.getVersion()
+  };
+});
+
+ipcMain.handle('download-update', async (event, opts = {}) => {
+  const url = opts.url;
+  if (!url) return { ok: false, error: 'No download URL for this release.' };
+
+  const version = String(opts.version || 'new').replace(/[^\w.-]/g, '');
+  const expected = String(opts.digest || '').replace(/^sha256:/i, '').trim().toLowerCase();
+  const tempDir = app.getPath('temp');
+
+  const send = (payload) => {
+    if (!event.sender.isDestroyed()) event.sender.send('update-progress', payload);
+  };
+
+  const logLine = (line) => {
+    try { fs.appendFileSync(path.join(tempDir, 'dfr-download.log'), line + '\n'); } catch (e) {}
+  };
+
+  // One download into its own freshly created file. Throws on any problem.
+  const attempt = async (dest) => {
+    // Never write into a file that is already there: a leftover (or locked) file
+    // from a previous run is exactly how a download can end up with the right
+    // size but the wrong bytes.
+    try { fs.unlinkSync(dest); } catch (e) {}
+
+    const res = await fetch(url, {
+      redirect: 'follow',
+      headers: { 'User-Agent': 'Twitch-Drops-Farmer-Revived' }
+    });
+    if (!res.ok || !res.body) throw new Error(`Download failed (HTTP ${res.status}).`);
+
+    const total = Number(res.headers.get('content-length')) || 0;
+    const nodeStream = Readable.fromWeb(res.body);
+    const fileStream = fs.createWriteStream(dest);
+    // Hash while streaming so the finished file can be checked against the
+    // sha256 GitHub publishes for the release asset.
+    const hasher = crypto.createHash('sha256');
+
+    let received = 0;
+    let lastTick = 0;
+    nodeStream.on('data', (chunk) => {
+      received += chunk.length;
+      hasher.update(chunk);
+      const now = Date.now();
+      if (now - lastTick > 200) {
+        lastTick = now;
+        send({ received, total, percent: total ? Math.min(100, Math.round((received / total) * 100)) : 0 });
+      }
+    });
+
+    await new Promise((resolve, reject) => {
+      nodeStream.pipe(fileStream);
+      fileStream.on('finish', resolve);
+      fileStream.on('error', reject);
+      nodeStream.on('error', reject);
+    });
+
+    const size = fs.existsSync(dest) ? fs.statSync(dest).size : 0;
+    const streamHash = hasher.digest('hex');
+    // Hash the file again off disk: the file is what gets installed, so it has
+    // to match too.
+    let diskHash = '';
+    try { diskHash = crypto.createHash('sha256').update(fs.readFileSync(dest)).digest('hex'); } catch (e) {}
+    logLine(`[${new Date().toISOString()}] ${path.basename(dest)} expected=${expected || '-'} stream=${streamHash} disk=${diskHash} size=${size} total=${total}`);
+
+    // A truncated or corrupted download must never be installed over a working exe.
+    if (total && size !== total) throw new Error(`The download stopped early (${size} of ${total} bytes).`);
+    if (size < 10 * 1024 * 1024) throw new Error('The downloaded file looks incomplete.');
+
+    // A Windows exe always starts with "MZ".
+    let head = '';
+    try {
+      const fd = fs.openSync(dest, 'r');
+      const buf = Buffer.alloc(2);
+      fs.readSync(fd, buf, 0, 2, 0);
+      fs.closeSync(fd);
+      head = buf.toString('latin1');
+    } catch (e) { /* the size checks above already passed */ }
+    if (head && head !== 'MZ') throw new Error('The downloaded file is not a Windows program.');
+
+    if (expected && (streamHash !== expected || (diskHash && diskHash !== expected))) {
+      console.error(`[Updates] checksum mismatch: expected ${expected}, stream ${streamHash}, disk ${diskHash}`);
+      throw new Error('checksum mismatch');
+    }
+
+    return { dest, size };
+  };
+
+  // Two tries, the second on a brand new path: if the first file was written
+  // wrong (stale/locked file, interrupted write) the retry usually lands.
+  let lastError = '';
+  for (let i = 1; i <= 2; i++) {
+    const dest = path.join(tempDir, `DropsFarmerRevived_v${version}${i > 1 ? `-retry${i}` : ''}.exe`);
+    try {
+      const out = await attempt(dest);
+      send({ received: out.size, total: out.size, percent: 100 });
+      return { ok: true, path: out.dest, size: out.size };
+    } catch (e) {
+      lastError = (e && e.message) || 'Download failed.';
+      console.error(`[Updates] download attempt ${i} failed: ${lastError}`);
+      try { fs.unlinkSync(dest); } catch (e2) {}
+    }
+  }
+
+  return {
+    ok: false,
+    error: lastError === 'checksum mismatch'
+      ? 'The download was corrupted on the way in. Try again.'
+      : lastError
+  };
+});
+
+ipcMain.handle('install-update', async (event, opts = {}) => {
+  const { mode, target } = updateMode();
+  const file = opts.path;
+
+  if (mode === 'none') return { ok: false, error: 'This build cannot update itself - use the release page.' };
+  if (!file || !fs.existsSync(file)) return { ok: false, error: 'The update file is missing, download it again.' };
+
+  const pid = process.pid;
+  const logFile = path.join(app.getPath('temp'), 'dfr-update.log');
+  const script = path.join(app.getPath('temp'), `dfr-update-${Date.now()}.ps1`);
+  // hex sha256 of the new exe, if GitHub gave us one for this release
+  const expectedSha = String(opts.digest || '').replace(/^sha256:/i, '').trim().toLowerCase();
+
+  // PowerShell, not cmd: we need an exact "is this PID still alive" check and a
+  // real retry loop. The portable launcher keeps its own exe open for a moment
+  // after the app exits (and antivirus can hold it), so a single copy is flaky.
+  const q = (p) => `'${String(p).replace(/'/g, "''")}'`;
+  const prologue = [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    `$log = ${q(logFile)}`,
+    `$expected = ${q(expectedSha)}`,
+    "function Log($m) { Add-Content -LiteralPath $log -Value ('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m) }",
+    `Log ('updating ' + ${q(path.basename(target))} + ' with ' + ${q(path.basename(file))})`,
+    '',
+    '# 1. wait for this app to be gone (up to 2 minutes)',
+    'for ($i = 0; $i -lt 240; $i++) {',
+    `  if (-not (Get-Process -Id ${pid} -ErrorAction SilentlyContinue)) { break }`,
+    '  Start-Sleep -Milliseconds 500',
+    '}',
+    "Log ('app exited after ' + $i + ' checks')"
+  ];
+
+  // Portable build: stage the new exe and swap it in over the file the user runs.
+  const swapBody = [
+    '',
+    '# 2. stage the new exe next to the target (and never touch the working',
+    '#    exe until the staged file is known-good)',
+    `$new = ${q(target)} + '.new'`,
+    'Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue',
+    '$ok = $false',
+    'for ($i = 0; $i -lt 60; $i++) {',
+    '  try {',
+    `    Copy-Item -LiteralPath ${q(file)} -Destination $new -Force -ErrorAction Stop`,
+    '    $ok = $true',
+    '    break',
+    '  } catch {',
+    '    Start-Sleep -Milliseconds 1000',
+    '  }',
+    '}',
+    'if ($ok -and $expected -ne "") {',
+    '  $h = (Get-FileHash -LiteralPath $new -Algorithm SHA256).Hash.ToLower()',
+    '  if ($h -eq $expected) {',
+    "    Log 'COPY_VERIFIED'",
+    '  } else {',
+    "    Log ('COPY_VERIFY_FAILED expected=' + $expected + ' got=' + $h)",
+    '    $ok = $false',
+    '  }',
+    '}',
+    '',
+    '# 3. swap it in, retrying while the launcher still holds the old exe',
+    'if ($ok) {',
+    '  $moved = $false',
+    '  for ($i = 0; $i -lt 60; $i++) {',
+    '    try {',
+    `      Move-Item -LiteralPath $new -Destination ${q(target)} -Force -ErrorAction Stop`,
+    '      $moved = $true',
+    '      break',
+    '    } catch {',
+    '      Start-Sleep -Milliseconds 1000',
+    '    }',
+    '  }',
+    '  if ($moved) {',
+    "    Log 'COPY_OK'",
+    `    Remove-Item -LiteralPath ${q(file)} -Force -ErrorAction SilentlyContinue`,
+    '  } else {',
+    "    Log 'COPY_FAILED - relaunching the current version'",
+    '    Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue',
+    '  }',
+    '} else {',
+    "  Log 'COPY_FAILED - relaunching the current version'",
+    '  Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue',
+    '}',
+    'Start-Sleep -Milliseconds 800',
+    `Start-Process -FilePath ${q(target)}`,
+    "Log 'relaunched'"
+  ];
+
+  // Installed build: the Setup is the update. Check it, run it silently, relaunch.
+  const installBody = [
+    '',
+    '# 2. check the installer before running it',
+    '$ok = $true',
+    'if ($expected -ne "") {',
+    `  $h = (Get-FileHash -LiteralPath ${q(file)} -Algorithm SHA256).Hash.ToLower()`,
+    '  if ($h -eq $expected) {',
+    "    Log 'INSTALLER_VERIFIED'",
+    '  } else {',
+    "    Log ('INSTALLER_VERIFY_FAILED expected=' + $expected + ' got=' + $h)",
+    '    $ok = $false',
+    '  }',
+    '}',
+    '',
+    '# 3. run the Setup silently (/S = no UI, no prompts) and relaunch',
+    'if ($ok) {',
+    `  $p = Start-Process -FilePath ${q(file)} -ArgumentList '/S' -Wait -PassThru`,
+    "  Log ('installer exit code ' + $p.ExitCode)",
+    '  Start-Sleep -Milliseconds 1500',
+    `  Start-Process -FilePath ${q(target)}`,
+    "  Log 'relaunched'",
+    `  Remove-Item -LiteralPath ${q(file)} -Force -ErrorAction SilentlyContinue`,
+    '} else {',
+    "  Log 'INSTALL_FAILED - relaunching the current version'",
+    `  Start-Process -FilePath ${q(target)}`,
+    '}'
+  ];
+
+  const lines = [
+    ...prologue,
+    ...(mode === 'installed' ? installBody : swapBody),
+    'Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue'
+  ];
+
+  try {
+    // UTF-8 with BOM: Windows PowerShell 5.1 reads BOM-less scripts as ANSI,
+    // which would mangle non-ASCII user paths.
+    fs.writeFileSync(script, '\ufeff' + lines.join('\r\n'), 'utf8');
+
+    // NOTE: spawn('powershell.exe', [...], { detached: true, stdio: 'ignore' })
+    // silently does nothing on Windows (verified: the script never runs, the
+    // child "exits 0"). Going through cmd/shell does run it, and the quoted
+    // path survives spaces in %TEMP%.
+    const child = spawn(
+      `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "${script}"`,
+      [],
+      { detached: true, stdio: 'ignore', windowsHide: true, shell: true }
+    );
+    child.unref();
+
+    setTimeout(() => {
+      isQuitting = true;
+      app.quit();
+    }, 400);
+
+    return { ok: true, target, mode };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || 'Could not start the updater.' };
   }
 });
 

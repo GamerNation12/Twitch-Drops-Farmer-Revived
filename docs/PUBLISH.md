@@ -8,22 +8,27 @@ and the **built `.exe`** (so non-technical people can just download and run it).
 ## 1. Push your changes
 
 ```powershell
-cd "C:\Users\minec\Desktop\Twitch Drops Miner\twitchdropsfarmer-fixed"
+cd "C:\Users\minec\Desktop\Twitch Drops Miner\Twitch-Drops-Farmer-Revived"
 git add -A
 git commit -m "what you changed"
 git push
 ```
 
-## 2. Build the portable exe
+## 2. Build the Windows builds
 
 ```powershell
 npm install
 npm run dist
 ```
 
-The result is `dist\TwitchDropsFarmer_v1.3.1.exe` — a single portable file, no
-installer. The first build downloads the electron-builder tooling, so give it a few
-minutes.
+Two artifacts land in `dist\`:
+
+* `dist\TwitchDropsFarmer_v1.3.3.exe` — the **portable** build (one file, no installer);
+* `dist\TwitchDropsFarmer_Setup_v1.3.3.exe` — the **installer** (NSIS, per-user, Start
+  Menu + desktop shortcut).
+
+The first build downloads the electron-builder tooling (and, for the installer, the NSIS
+binaries), so give it a few minutes.
 
 > **npm skipped Electron's download?** Some npm versions block dependency install
 > scripts (you'll see `npm warn allow-scripts ... electron@32.3.3 (postinstall)`).
@@ -38,28 +43,42 @@ minutes.
 
 Smoke-test before publishing:
 
-1. Run the exe — the app window opens. (No black screen: that is fix #1.)
-2. If the app does not show your account, run it once with `--twitch-login` and sign
+1. Run the portable exe — the app window opens. (No black screen: that is fix #1.)
+2. Install the Setup exe (or `TwitchDropsFarmer_Setup_v1.3.3.exe /S` for a silent
+   per-user install) and run it from the Start Menu.
+3. If the app does not show your account, run it once with `--twitch-login` and sign
    in (or use the **Login** button in the header: the activation code is copied to
    your clipboard automatically).
-3. Console tab: campaigns load, no `AUTH_EXPIRED` / `invalid client` errors.
+4. Console tab: campaigns load, no `AUTH_EXPIRED` / `invalid client` errors.
+5. `✕` quits the app (processes gone), `—` minimises to the taskbar and **Background**
+   hides it to the tray with the processes still running.
+6. With a Twitch session in the profile, farming starts by itself (Settings →
+   *Start Farming When The App Opens*).
 
-## 3. Attach the exe to a Release
+## 3. Attach the builds to a Release
 
 GitHub rejects files over 100 MB inside the repository, but a **release asset** may
-be up to 2 GB — so the exe goes into a Release, not into git.
+be up to 2 GB — so the exes go into a Release, not into git.
 
-Web UI: **Releases → Draft a new release**, tag `v1.3.2`, paste the notes from
-`docs\RELEASE-NOTES-v1.3.2.md`, then drag in `dist\TwitchDropsFarmer_v1.3.2.exe`.
+Web UI: **Releases → Draft a new release**, tag `v1.3.3`, paste the notes from
+`docs\RELEASE-NOTES-v1.3.3.md`, then drag in **both** `dist\TwitchDropsFarmer_v1.3.3.exe`
+and `dist\TwitchDropsFarmer_Setup_v1.3.3.exe`.
 
 Or from the command line (GitHub CLI):
 
 ```powershell
-gh release create v1.3.2 `
-  "dist\TwitchDropsFarmer_v1.3.2.exe" `
-  --title "v1.3.2 - window controls, branding, changelog popup" `
-  --notes-file docs\RELEASE-NOTES-v1.3.2.md
+gh release create v1.3.3 `
+  "dist\TwitchDropsFarmer_v1.3.3.exe" `
+  "dist\TwitchDropsFarmer_Setup_v1.3.3.exe" `
+  --title "v1.3.3 - auto-start farming, in-app updates, new Inventory" `
+  --notes-file docs\RELEASE-NOTES-v1.3.3.md
 ```
+
+> **The in-app updater depends on this step.** It calls `releases/latest` and picks the
+> asset that fits the running build: the portable exe (`TwitchDropsFarmer_vX.Y.Z.exe`)
+> for portable builds, the `*_Setup_*.exe` installer for installed builds. Publish the
+> release (not a draft) with the same version as `package.json`, and older builds offer
+> *Update to vX.Y.Z & restart* and update themselves.
 
 Anyone can then download the exe, run it, and press **Login** in the header if the
 app profile has no Twitch session yet (the activation code goes to the clipboard).

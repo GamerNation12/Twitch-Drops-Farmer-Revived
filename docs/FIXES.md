@@ -1,4 +1,4 @@
-# What was changed (v1.3.0 → v1.3.2)
+# What was changed (v1.3.0 → v1.3.3)
 
 Every change below is relative to upstream
 `lokalizator-repo/TwitchDropsFarmer@v1.3.0`. Files touched: `main.js`,
@@ -328,6 +328,159 @@ notes are shown in a proper popup, and it opens by itself when a new version sho
 
 ---
 
+## 10. Closing the app actually closes it (`main.js`, `preload.js`, `renderer.js`, `index.html`)
+
+The `✕` button (and the `window.on('close')` handler) hid the window to the tray, so the
+close button looked broken and the process kept running with no visible window. The two
+behaviours are now split, as the buttons promise:
+
+* `✕` → `ipcMain.on('window-quit')` sets `isQuitting`, then `app.quit()`; the window
+  `close` handler no longer `preventDefault()`s and calls `app.quit()` itself, because
+  the hidden farm/claim windows would otherwise keep the process alive after the main
+  window was destroyed;
+* **Background** → `ipcMain.on('window-close')` → `mainWindow.hide()`, unchanged, plus
+  the one-per-run tray balloon.
+
+Button titles follow: `Close the app (stops farming)` vs
+`Minimize to the background (tray) - farming keeps running`.
+
+## 11. Auto-start farming is its own, independent setting (`main.js`, `renderer.js`, `index.html`)
+
+Previously `autoStartFarm` was only honoured when `autoLaunchEnabled` was also true
+(`autoStartFarm && autoLaunchEnabled`), it was rendered inside the
+`#startupSubSettings` group (disabled-looking whenever "launch with Windows" was off) and
+it defaulted to `false`.
+
+* the row moved out of `#startupSubSettings`, so it is always visible and always
+  switchable; the mode select (**Priority Queue** / **Global Queue**) enables with it;
+* `get-auto-launch` now returns the raw value and defaults it to `true`;
+* a one-time migration (`autoStartFarmMigrated`) flips existing installs to `true` once —
+  old builds had persisted `false` for everyone who never touched the (disabled) switch —
+  and `set-auto-launch` marks the flag so the user's later choice always wins;
+* `triggerAutoStartFarm()` can fire when the config arrives (not only on a token event),
+  so an already-connected account starts farming immediately;
+* if **Priority** is selected but `autoFarmGames` is empty, it logs
+  `[Startup] Your priority list is empty — auto-starting in GLOBAL mode.` and farms
+  globally instead of idling.
+
+## 12. In-app updater for the portable build (`main.js`, `preload.js`, `index.html`, `style.css`, `renderer.js`)
+
+`electron-updater` does not support the `portable` target, and `process.execPath` points
+at the temp folder a portable exe unpacks itself into — not at the file the user
+double-clicked. electron-builder exposes the real path in `PORTABLE_EXECUTABLE_FILE`, so:
+
+* `update-capability` reports `canSelfUpdate` (true only when that env var exists);
+* `check-for-updates` also returns the asset's `digest` (`sha256:<hex>`), which GitHub
+  publishes for release assets;
+* `download-update` streams the release asset with `fetch` +
+  `Readable.fromWeb(...).pipe(fs.createWriteStream(...))` into `%TEMP%`, emitting
+  `update-progress` events (~5/s) that drive the popup's progress bar. It hashes the bytes
+  while streaming **and hashes the finished file again off disk**, throwing the file away
+  unless both match the release `digest`. It also rejects a size that disagrees with
+  `content-length`, anything under 10 MB (an error page), and anything that does not start
+  with `MZ`. Every check is logged to `%TEMP%\dfr-download.log`;
+* `install-update` writes a small **PowerShell** helper (started `detached`; `cmd` cannot do
+  a reliable PID check) that: waits for this PID to disappear (240 × 500 ms), copies the new
+  exe to a `.new` file **next to** the target with up to 60 retries (the portable launcher
+  keeps its own exe open for a moment after the app exits, and antivirus can hold it),
+  verifies that staged file's SHA-256 against the release digest, and only then moves it over
+  `PORTABLE_EXECUTABLE_FILE`, relaunches, deletes the temp payload and logs every step to
+  `%TEMP%\dfr-update.log` (`COPY_VERIFIED` / `COPY_OK` / `COPY_FAILED`). If the staged file
+  fails verification the working exe is left untouched;
+* the app then quits itself (~400 ms later) so the swap can happen;
+* if `canSelfUpdate` is false the popup button degrades to *Download vX.Y.Z*, which opens
+  the release asset in the browser exactly as before.
+
+## 13. Inventory rewrite (`renderer.js`, `index.html`, `style.css`)
+
+The old view was a flat list of `drop-item-row`s with no summary and no sort. It now
+renders, in this order:
+
+* a four-card summary strip (rewards collected / matching, game groups, campaigns in
+  progress, newest drop date) — `n Game group`/`n Game groups` pluralised;
+* an **In Progress** section built from `dropCampaignsInProgress`, one card per campaign
+  with artwork, `x/y drops claimed`, the campaign percentage and a progress bar per drop
+  (`min(current, required)/required`, green tick when `self.isClaimed`);
+* collapsible game groups with box art, a drop count, the newest date and a rotating
+  chevron — state kept in a `Set`, applied with real `addEventListener` handlers (inline
+  `onclick` broke on game names containing `'`);
+* a sort control (`recent` / `game` / `count` / `name`, persisted as
+  `inventorySortMode`) and the existing search, both feeding the same grouping code;
+* `loading="lazy" decoding="async"` on every tile image, plus an `error` listener that
+  hides dead artwork instead of drawing a broken-image icon.
+
+## 14. Resource use (`renderer.js`)
+
+* `addLog` trims `#logConsole` to the newest `MAX_LOG_ENTRIES` (500) nodes — it used to
+  grow unbounded for the whole session;
+* `renderCampaignsListItems()` returns early when `campaignsContainer.offsetParent` is
+  `null` (another view is open); `switchView('campaigns')` re-renders on the way in, and
+  the dashboard counters are still updated;
+* the priority chips/grid are only rebuilt while the Settings view is visible, and
+  `switchView('settings')` rebuilds them on entry;
+* `farmingInterval` went from 30s to 45s;
+* `backgroundThrottling: false` on the main window: the farming loop, the campaign
+  refresh and auto-claim all run in that renderer, and Chromium throttles hidden
+  windows to roughly one timer tick per minute — which made "farming in the tray" crawl
+  whenever the window was hidden or covered. The hidden farm/claim windows already had
+  this set.
+
+---
+
+## 15. Installed (NSIS) build next to the portable one (`package.json`, `main.js`, `renderer.js`)
+
+The repo shipped one artifact: a portable exe. That is fine for a USB stick but it is not
+a normal Windows app — no shortcut, no Start Menu entry, and nothing for "update" to mean
+other than replacing the file. `npm run dist` now builds **both**:
+
+* `dist\TwitchDropsFarmer_v<version>.exe` — portable (`portable` target, unchanged);
+* `dist\TwitchDropsFarmer_Setup_v<version>.exe` — an NSIS installer (`nsis` target):
+  `oneClick: false` (so the installer has a normal wizard and lets you pick the folder),
+  `perMachine: false` (per-user, no UAC prompt), `allowToChangeInstallationDirectory`,
+  Start Menu + desktop shortcuts (`shortcutName: "Drops Farmer Revived"`),
+  `runAfterFinish`, and `deleteAppDataOnUninstall: false` so uninstalling does **not**
+  throw away the app's Twitch session in `%APPDATA%\twitch-drop-farmer`.
+
+Because the app is the same (`name` is still `twitch-drop-farmer`), the portable and the
+installed copy share that profile — a login made in one works in the other.
+
+The updater now has two modes (`updateMode()` in `main.js`):
+
+* **portable** — `PORTABLE_EXECUTABLE_FILE` is set: download the new portable exe, wait
+  for the app to exit, swap the file (details below);
+* **installed** — `app.isPackaged` and no such env var: `process.execPath` *is* the real
+  installed exe, so the update is the new **Setup**, run with `/S` (silent, no UI, no
+  prompts) after the app has exited, and the app is started again afterwards;
+* **none** — running from source: `canSelfUpdate` is false and the popup button falls back
+  to the release page, exactly as before.
+
+`check-for-updates` returns `mode`, `assetName` and `isInstaller`, and picks the asset that
+fits the running build (`*_Setup_*.exe` for installed builds, `TwitchDropsFarmer_v*.exe`
+otherwise) instead of "the first .exe in the release".
+
+The updater script logs to `%TEMP%\dfr-update.log`:
+`INSTALLER_VERIFIED` / `installer exit code 0` / `relaunched` for installed builds,
+`COPY_VERIFIED` / `COPY_OK` for portable ones.
+
+### Never install a bad file
+
+Both paths verify before they touch anything that works:
+
+* the download is hashed **while streaming and again off disk** and must match the
+  `sha256:` GitHub publishes for the asset (`check-for-updates` returns it); a mismatch, a
+  size that disagrees with `content-length`, a file under 10 MB, or a file that does not
+  start with `MZ` is discarded. Everything is logged to `%TEMP%\dfr-download.log`, and the
+  download is retried once on a fresh path (`...-retry2.exe`) because a leftover or locked
+  file in `%TEMP%` is a real failure mode - that retry plus the disk hash was added after a
+  test machine produced a correctly-sized download whose bytes did not match the release;
+* the portable swap stages the new exe as `<exe>.new` **next to** the target, verifies that
+  staged file, and only then moves it over the real exe;
+* the installed build verifies the Setup's hash before running it.
+
+If verification fails the app simply keeps running the version it has.
+
+---
+
 ## Verified locally
 
 * Anonymous device request with the TV client returns a `user_code` (the web client
@@ -368,3 +521,39 @@ notes are shown in a proper popup, and it opens by itself when a new version sho
   A simulated newer release produced *Update available / You have v1.3.0 — v1.3.2 is
   available / Skip this one (v1.3.2) / Download v1.3.2*, and `Esc` closed it. Markdown
   injection check: `<b>raw html</b>` in a release body came out as `&lt;b&gt;` text.
+* Auto-start farming, live: config `autoStartFarm: true` after the one-time migration,
+  the switch renders checked and the mode select enabled, and the console shows
+  `🚀 [Startup] Auto-start farming triggered automatically in PRIORITY mode.` followed by
+  `Auto-Farm: Switching to Marvel Rivals — next in priority list` and
+  `Watching jennie...` within two seconds of launch.
+* Inventory, live: summary `114 rewards / 2 game groups / 5 in progress / Oct 19, 2026`;
+  five in-progress cards with per-drop bars and green `✓ claimed` ticks; two collapsible
+  groups (Marvel Rivals, Other Rewards); 120 images all lazy, 51 loaded on screen;
+  sorting by game gave `Marvel Rivals, Other Rewards`, searching `marvel` reduced the
+  view to that one group (`3 matching rewards`); collapse set
+  `class="inventory-group collapsed"` + `display:none` and toggled back.
+* Console cap, live: after 620 `addLog` calls `#logConsole` held exactly 500 entries.
+* Campaign render guard, live: with the Dashboard open `applyCurrentFilters()` left
+  `#campaignsContainer` at 1 node; `switchView('campaigns')` rendered all 88 cards; the
+  Settings priority grid rebuilt on entry.
+* No `Runtime.exceptionThrown` events during the whole CDP run.
+* Portable updater, live against the real v1.3.2 release asset: `update-capability` →
+  `mode: "portable"`, and `%TEMP%\dfr-download.log` shows
+  `expected == stream == disk == 2353375087…` (73,560,967 bytes, matching the asset's
+  published digest). `%TEMP%\dfr-update.log` shows
+  `app exited after 1 checks → COPY_VERIFIED → COPY_OK → relaunched`; the target file on
+  disk then hashed exactly the release digest, the payload was deleted, no `.new` file was
+  left behind, and the relaunched app was running from the swapped file.
+* Download integrity, live: with a deliberately wrong digest the download was refused,
+  the file deleted, and no install happened (`The download was corrupted on the way in`).
+* Installed build, live: `TwitchDropsFarmer_Setup_v1.3.3.exe /S /D=<temp dir>` installed
+  with exit code 0, created the Start Menu + desktop shortcuts and the per-user uninstall
+  entry, and the installed app reported `canSelfUpdate: true, mode: "installed"` with
+  `target` = its own installed exe. `install-update` then logged
+  `INSTALLER_VERIFIED → installer exit code 0 → relaunched` and the app came back running
+  from the install directory. A silent uninstall removed the files, both shortcuts and the
+  registry entry, and left the app profile (the Twitch login) alone.
+* Packaged artifact check (`verify-build.mjs`): 34 checks pass on the built asar, including
+  both update modes, the Setup/portable asset choice, the digest + staged-swap verification
+  and the NSIS build config; both `dist\TwitchDropsFarmer_v1.3.3.exe` (70.2 MB) and
+  `dist\TwitchDropsFarmer_Setup_v1.3.3.exe` (70.4 MB) are present and over 50 MB.
