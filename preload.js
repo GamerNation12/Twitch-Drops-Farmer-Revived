@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // App utilities
   openExternal: (url) => ipcRenderer.send('open-external', url),
   copyToClipboard: (text) => ipcRenderer.invoke('copy-to-clipboard', text),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getAutoLaunch: () => ipcRenderer.invoke('get-auto-launch'),
   setAutoLaunch: (opts) => ipcRenderer.invoke('set-auto-launch', opts)

@@ -320,6 +320,66 @@ ipcMain.handle('poll-device-token', async (event, deviceCode) => {
   }
 });
 
+// ============================================================
+// LOCAL PATCH: update check against this fork's GitHub releases
+// The renderer asks for this; the request has to happen here because the
+// GitHub API requires a User-Agent header, which the renderer cannot set.
+// ============================================================
+const UPDATE_REPO = 'GamerNation12/Twitch-Drops-Farmer-Revived';
+
+function semverParts(v) {
+  return String(v || '').replace(/^v/i, '').split(/[.\-+]/).map((n) => parseInt(n, 10) || 0);
+}
+
+function semverNewer(candidate, current) {
+  const a = semverParts(candidate);
+  const b = semverParts(current);
+  const len = Math.max(a.length, b.length, 3);
+  for (let i = 0; i < len; i++) {
+    const x = a[i] || 0;
+    const y = b[i] || 0;
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return false;
+}
+
+ipcMain.handle('check-for-updates', async () => {
+  const currentVersion = app.getVersion();
+  try {
+    const res = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
+      headers: {
+        'User-Agent': 'Twitch-Drops-Farmer-Revived',
+        'Accept': 'application/vnd.github+json'
+      }
+    });
+
+    if (res.status === 404) {
+      // Repo exists but no release published yet.
+      return { currentVersion, latestVersion: currentVersion, hasUpdate: false, reason: 'no-releases' };
+    }
+    if (!res.ok) {
+      return { currentVersion, error: `GitHub API returned ${res.status}` };
+    }
+
+    const release = await res.json();
+    const latestVersion = String(release.tag_name || release.name || '').replace(/^v/i, '');
+    const asset = (release.assets || []).find((a) => /\.exe$/i.test(a.name));
+
+    return {
+      currentVersion,
+      latestVersion,
+      hasUpdate: semverNewer(latestVersion, currentVersion),
+      releaseUrl: release.html_url,
+      downloadUrl: asset ? asset.browser_download_url : release.html_url,
+      notes: String(release.body || '').slice(0, 2000),
+      publishedAt: release.published_at
+    };
+  } catch (e) {
+    return { currentVersion, error: (e && e.message) || 'network error' };
+  }
+});
+
 ipcMain.handle('get-user-info', async (event, tokens) => {
   return await gql.execute('GetUserInfo', {}, buildHeaders(tokens));
 });

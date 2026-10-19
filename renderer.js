@@ -1035,39 +1035,58 @@ function semverCompare(a, b) {
     return 0;
 }
 
-async function checkUpdates() {
+// LOCAL PATCH: update check now points at this fork's GitHub releases
+// (GamerNation12/Twitch-Drops-Farmer-Revived) instead of the dead upstream
+// repo, and it also runs by itself at startup and every 6 hours.
+async function checkUpdates(silent = false) {
     const btn = document.getElementById('btnCheckUpdate');
     const notice = document.getElementById('updateNotice');
-    if (!btn || !notice) return;
+    if (!btn || !notice) return null;
 
-    btn.innerText = 'Checking...';
-    btn.disabled = true;
+    if (!silent) {
+        btn.innerText = 'Checking...';
+        btn.disabled = true;
+    }
     notice.innerText = '';
+    notice.onclick = null;
 
     try {
-        const repoUrl = "https://raw.githubusercontent.com/lokalizator-repo/TwitchDropsFarmer/main/package.json";
-        const res = await fetch(repoUrl);
-        if (!res.ok) throw new Error('Network error');
+        const info = await window.electronAPI.checkForUpdates();
 
-        const remote = await res.json();
-        const currentVersion = await window.electronAPI.getAppVersion();
-
-        if (semverCompare(remote.version, currentVersion) > 0) {
-            notice.innerHTML = `<span style="color: var(--warning); cursor: pointer; text-decoration: underline;">New version ${remote.version} available!</span>`;
-            notice.onclick = () => window.electronAPI.openExternal("https://github.com/lokalizator-repo/TwitchDropsFarmer/releases");
-            showToast(`New version ${remote.version} available!`, 'warn');
-        } else {
-            notice.innerHTML = `<span style="color: var(--success);">You have the latest version (v${currentVersion}).</span>`;
-            showToast('You are on the latest version', 'success');
+        if (!info) {
+            notice.innerHTML = `<span style="color: var(--danger);">Error checking updates.</span>`;
+            return null;
         }
+
+        if (info.hasUpdate) {
+            notice.innerHTML = `<span style="color: var(--warning); cursor: pointer; text-decoration: underline;" title="Open the download page">Update available: v${info.latestVersion} (you have v${info.currentVersion}) - click to download</span>`;
+            notice.onclick = () => window.electronAPI.openExternal(info.downloadUrl || info.releaseUrl);
+            addLog(`[Updates] New version v${info.latestVersion} is available (you have v${info.currentVersion}).`, 'system');
+            showToast(`Update available: v${info.latestVersion}`, 'warn', 7000);
+        } else if (info.error) {
+            notice.innerHTML = `<span style="color: var(--danger);">Could not check for updates: ${info.error}</span>`;
+        } else if (info.reason === 'no-releases') {
+            notice.innerHTML = `<span style="color: var(--text-secondary);">No releases published yet (running v${info.currentVersion}).</span>`;
+        } else {
+            notice.innerHTML = `<span style="color: var(--success);">You have the latest version (v${info.currentVersion}).</span>`;
+            if (!silent) showToast('You are on the latest version', 'success');
+        }
+        return info;
     } catch (e) {
         console.error("Update check failed:", e);
         notice.innerHTML = `<span style="color: var(--danger);">Error checking updates.</span>`;
+        return null;
     } finally {
-        btn.innerText = 'Check for Updates';
-        btn.disabled = false;
+        if (!silent) {
+            btn.innerText = 'Check Now';
+            btn.disabled = false;
+        }
     }
 }
+
+// Automatic checks: once shortly after launch, then every 6 hours.
+setTimeout(() => { checkUpdates(true); }, 8000);
+setInterval(() => { checkUpdates(true); }, 6 * 60 * 60 * 1000);
 
 function addCustomGame() {
     if (!autoFarmSearch) return;
