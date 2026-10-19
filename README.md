@@ -43,6 +43,11 @@ To build the portable `.exe` (output in `dist\`):
 npm run dist
 ```
 
+Shipping it to other people? [`docs/PUBLISH.md`](docs/PUBLISH.md) has the exact
+GitHub steps (repo + Release asset), and
+[`tools/Sign in to Twitch (first run).bat`](tools) is meant to sit next to the exe
+so a first-time user only has to double-click one file.
+
 ---
 
 ## Signing in
