@@ -13,3 +13,6 @@ npm-debug.log*
 .idea/
 Thumbs.db
 desktop.ini
+
+# runtime debug dump written by main.js on every campaign fetch
+debug_campaigns.json
