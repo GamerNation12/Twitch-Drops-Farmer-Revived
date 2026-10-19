@@ -1,4 +1,4 @@
-# What was changed (v1.3.0 → v1.3.1)
+# What was changed (v1.3.0 → v1.3.2)
 
 Every change below is relative to upstream
 `lokalizator-repo/TwitchDropsFarmer@v1.3.0`. Files touched: `main.js`,
@@ -216,6 +216,116 @@ comparison, the release URL, the download URL of the `.exe` asset and the notes.
 renderer turns that into a clickable notice that opens the download directly, and runs
 the same check silently 8 s after launch and then every 6 hours.
 
+## 7. Window buttons and taskbar behaviour (`main.js`, `preload.js`, `index.html`, `style.css`, `renderer.js`)
+
+Reported from the real app: *"the app closes to the background when I click the icon on
+my taskbar, and there is no minimize button"*. Three separate causes:
+
+* `titleBarStyle: 'hidden'` was combined with `titleBarOverlay`, but the app's own
+  50px header sat on top of the overlay area (the CSS even reserved room with
+  `margin-right: 140px`), so the native minimise/maximise/close buttons were invisible
+  and unclickable.
+* The main process intercepted minimising and turned it into a tray hide:
+
+  ```js
+  mainWindow.on('minimize', (event) => {
+    event.preventDefault();
+    mainWindow.hide();      // <- the app "closes to the background"
+  });
+  ```
+
+* There was no `app.requestSingleInstanceLock()`, so clicking a pinned taskbar icon
+  while the app sat in the tray started a **second** instance — two miners, two farm
+  windows, one account.
+
+Changes:
+
+* The interception is gone, so minimising (the button or a taskbar click) minimises
+  like any other window and the app stays in the taskbar where you can click it again.
+* `titleBarOverlay` removed; the app draws its own controls in the header:
+
+  | Button | Icon | Action |
+  |---|---|---|
+  | Minimize | `—` | normal minimise to the taskbar |
+  | **Background** | arrow into a tray + the label *Background* | hides the window to the tray, farming keeps running (purple, labelled on purpose — a bare icon left people guessing) |
+  | Maximize / Restore | `□` | toggles maximise, icon and tooltip follow the state |
+  | Close | `✕` | hide to the tray, same as it always did |
+
+  wired to `window-minimize`, `window-close` and `window-maximize-toggle`:
+
+  ```js
+  ipcMain.on('window-minimize', () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize(); });
+  ipcMain.on('window-close', () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide(); });
+  ipcMain.handle('window-maximize-toggle', () => { /* maximize / unmaximize, returns new state */ });
+  ```
+
+  The first hide-to-tray of a run also shows a Windows tray balloon so the app does
+  not just seem to vanish.
+* Single-instance lock, so clicking the app icon again (taskbar shortcut, tray,
+  start menu) brings the running window back instead of starting a second miner:
+
+  ```js
+  const gotSingleInstanceLock = app.requestSingleInstanceLock();
+  if (!gotSingleInstanceLock) app.quit();
+  else app.on('second-instance', () => { /* restore + show + focus */ });
+  ```
+
+* Clicking the tray icon now restores a minimised window instead of hiding it.
+  `Quit` lives in the tray menu.
+
+## 8. Header branding (`index.html`, `renderer.js`, `main.js`)
+
+The header still said *"Drops Farmer"* with a **hardcoded** `v1.3` badge, so it never
+matched the real build. It now reads **Drops Farmer Revived** and the badge is filled
+in at startup from the app's own version:
+
+```js
+const badge = document.getElementById('headerBrandVersion');
+const version = await window.electronAPI.getAppVersion();   // -> app.getVersion()
+if (version) badge.innerText = 'v' + version;
+```
+
+The tray tooltip, the tray balloon and the sign-in window title use the same
+`BRAND_NAME` constant, and the window title is `Drops Farmer Revived`.
+
+While in there, the header *format* was tidied up:
+
+* the "currently farming" pill is now absolutely centred (`left: 50%` +
+  `translateX(-50%)`) instead of drifting around depending on how wide the brand and
+  the user widget happen to be;
+* the three header clusters had three different corner radii (30px / 20px / 12px) and
+  slightly different heights — they are all pills of the same height now, so the row
+  reads as one strip;
+* the window-controls cluster sits on its own small glass panel instead of floating
+  bare on the header.
+
+## 9. Update changelog popup (`main.js`, `preload.js`, `index.html`, `style.css`, `renderer.js`)
+
+An update being available used to be a one-line link in Settings. Now the release
+notes are shown in a proper popup, and it opens by itself when a new version shows up:
+
+* the main-process handler already fetched the release body; the notes cap went from
+  2000 to 4000 characters so full release notes fit;
+* `renderer.js` renders that markdown safely — the text is HTML-escaped **first**, then
+  only headings, bullets, bold, `code`, links and `---` are turned into markup, so a
+  release can never inject HTML into the app window:
+
+  ```js
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  ```
+
+* the popup shows the version transition (`You have v1.3.1 — v1.3.2 is available`), the
+  notes in a scrollable box, a **Skip this one (v1.3.2)** checkbox (remembered in
+  `localStorage` under `dfr.dismissedUpdateVersion`), **Later**, and a
+  **Download vX.Y.Z** button that opens the release asset directly;
+* it closes with `Esc`, the overlay click, or *Later*;
+* the same popup doubles as a changelog viewer: when you are already up to date the
+  Settings notice gets a **What's new?** link that opens the notes of the version you
+  are running (`What's new in v1.3.2`, no skip checkbox, button reads *Open release
+  page*);
+* a silent background check pops it up only if that exact version was not skipped — a
+  manual **Check Now** always shows it.
+
 ---
 
 ## Verified locally
@@ -238,3 +348,23 @@ the same check silently 8 s after launch and then every 6 hours.
 * Inventory: **111 of 111 rows now render a real image** (previously 2 of 111, the
   rest placeholders), all of them `static-cdn.jtvnw.net/twitch-quests-assets/...`
   and all reported `complete && naturalWidth > 0` in the rendered DOM.
+* Window controls, driven over CDP against a live window: the four buttons exist,
+  are inside the viewport and are `no-drag`; the *Minimize* button minimises (the app
+  stays in the taskbar) and the **Background** button hides the window while the
+  Electron processes keep running (farming continues). Launching the app a second time
+  while it is minimised *and* while it is in the tray brought the same window back —
+  `[SingleInstance] second launch detected - restoring the running window` in the log,
+  no extra process, no second miner.
+* Header: the farm pill reports a centre of 600.5px in a 1200px window (i.e. centred),
+  all three header clusters are 34px tall and vertically centred at y=25, and the
+  window-controls panel's right edge is 16px from the window edge.
+* Branding: `app.getVersion()` → `1.3.2`, badge reads `v1.3.2`, window title
+  `Drops Farmer Revived`, tray tooltip / balloon / sign-in window title all use
+  `BRAND_NAME`.
+* Changelog popup, against the **live GitHub release**: *Check Now* on v1.3.2 returned
+  "You have the latest version (v1.3.2). **What's new?**", and clicking that opened the
+  popup titled *What's new in v1.3.2* with the real 3.7 KB release notes rendered as
+  headings/lists/links, the skip row hidden and the button reading *Open release page*.
+  A simulated newer release produced *Update available / You have v1.3.0 — v1.3.2 is
+  available / Skip this one (v1.3.2) / Download v1.3.2*, and `Esc` closed it. Markdown
+  injection check: `<b>raw html</b>` in a release body came out as `&lt;b&gt;` text.

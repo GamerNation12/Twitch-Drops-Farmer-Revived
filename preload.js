@@ -27,6 +27,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateTrayTooltip: (text) => ipcRenderer.send('update-tray-tooltip', text),
   minimizeToTray: () => ipcRenderer.send('minimize-to-tray'),
 
+  // Local patch: window controls (the native title bar is hidden)
+  minimizeWindow: () => ipcRenderer.send('window-minimize'),
+  toggleMaximizeWindow: () => ipcRenderer.invoke('window-maximize-toggle'),
+  hideWindowToTray: () => ipcRenderer.send('window-close'),
+
   // WebSocket
   wsConnect: (userId, authToken) => ipcRenderer.invoke('ws-connect', userId, authToken),
   wsStatus: () => ipcRenderer.invoke('ws-status'),

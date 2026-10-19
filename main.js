@@ -47,7 +47,12 @@ let inventoryCache = { data: null, timestamp: 0, ttl: 20000 };
 
 let mainWindow;
 let tray = null;
+let trayBalloonShown = false;   // local patch: only balloon once per run
 let isQuitting = false;
+
+// LOCAL PATCH: one place for the display name shown by the tray and the
+// sign-in window (the repo/product is "Drops Farmer Revived" now).
+const BRAND_NAME = 'Drops Farmer Revived';
 
 /**
  * Build standard Twitch GQL headers including optional Integrity and Device-Id
@@ -91,23 +96,63 @@ function createTray() {
     }
   ]);
 
-  tray.setToolTip('Twitch Drops Farmer');
+  tray.setToolTip(BRAND_NAME);
   tray.setContextMenu(contextMenu);
 
   tray.on('click', () => {
-    mainWindow.isVisible() ? mainWindow.hide() : mainWindow.show();
+    // LOCAL PATCH: restore from a normal minimise before toggling visibility,
+    // otherwise clicking the tray icon of a minimised window just hid it.
+    if (mainWindow.isVisible() && !mainWindow.isMinimized()) {
+      mainWindow.hide();
+    } else {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
   });
 }
 
 ipcMain.on('update-tray-tooltip', (event, text) => {
   if (tray) {
-    tray.setToolTip(`Twitch Drops Farmer\n${text}`);
+    tray.setToolTip(`${BRAND_NAME}\n${text}`);
   }
 });
 
 ipcMain.on('minimize-to-tray', () => {
   if (mainWindow) {
     mainWindow.hide();
+  }
+});
+
+// LOCAL PATCH: real window controls. The native title bar is hidden and the
+// titleBarOverlay buttons were sat under the app's own header, so the app draws
+// its own minimise / maximise / close buttons and wires them to these.
+ipcMain.on('window-minimize', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize();
+});
+
+ipcMain.handle('window-maximize-toggle', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (mainWindow.isMaximized()) {
+    mainWindow.unmaximize();
+    return false;
+  }
+  mainWindow.maximize();
+  return true;
+});
+
+// Same behaviour as the X button always had: hide to the tray, keep farming.
+ipcMain.on('window-close', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+  // Windows: tell the user where the app went, once per run.
+  if (process.platform === 'win32' && tray && !trayBalloonShown) {
+    trayBalloonShown = true;
+    try {
+      tray.displayBalloon({
+        title: `${BRAND_NAME} is still running`,
+        content: 'Minimized to the tray - farming continues. Click the tray icon to reopen, or right-click it to quit.'
+      });
+    } catch (e) { /* balloons are best-effort */ }
   }
 });
 
@@ -189,11 +234,6 @@ const createWindow = () => {
       nodeIntegration: false
     },
     titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: '#0e0e10',
-      symbolColor: '#bf94ff',
-      height: 40
-    },
     backgroundColor: '#0e0e10',
     show: false
   })
@@ -216,11 +256,11 @@ const createWindow = () => {
     }
   }, 2000)
 
-  mainWindow.on('minimize', (event) => {
-    event.preventDefault();
-    mainWindow.hide();
-  });
-
+  // LOCAL PATCH: the old code intercepted 'minimize' and hid the window to the
+  // tray instead, which made clicking the taskbar icon look like the app had
+  // closed into the background. Minimising now behaves like any other window:
+  // the app stays in the taskbar and clicking its icon brings it back. Use the
+  // header's X button (or Settings > Minimize to tray) to hide it to the tray.
   mainWindow.on('close', (event) => {
     if (!isQuitting) {
       event.preventDefault();
@@ -281,7 +321,29 @@ session.defaultSession.webRequest.onBeforeSendHeaders(
 );
 }
 
+// LOCAL PATCH: only one copy of the miner may run at a time. Previously,
+// clicking a pinned taskbar icon while the app sat in the tray started a second
+// instance (two miners, two farm windows, same account). Now the second launch
+// just brings the existing window back.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    // The user clicked the app icon again (taskbar/tray shortcut/start menu).
+    // Bring the running window back instead of running a second miner.
+    console.log('[SingleInstance] second launch detected - restoring the running window');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
 app.whenReady().then(() => {
+  if (!gotSingleInstanceLock) return;
   createWindow()
   createTray()
   app.on('activate', () => {
@@ -376,7 +438,7 @@ ipcMain.handle('check-for-updates', async () => {
       hasUpdate: semverNewer(latestVersion, currentVersion),
       releaseUrl: release.html_url,
       downloadUrl: asset ? asset.browser_download_url : release.html_url,
-      notes: String(release.body || '').slice(0, 2000),
+      notes: String(release.body || '').slice(0, 4000),
       publishedAt: release.published_at
     };
   } catch (e) {
@@ -993,6 +1055,7 @@ async function trySilentAutoConnect() {
 }
 
 app.whenReady().then(() => {
+  if (!gotSingleInstanceLock) return;
   setTimeout(() => {
     trySilentAutoConnect().then((ok) => {
       if (!ok) console.log('[AutoConnect] no stored Twitch session found - use the Login button when you are ready.');
@@ -1008,7 +1071,7 @@ if (process.argv.includes('--twitch-login')) {
       width: 1000,
       height: 820,
       autoHideMenuBar: true,
-      title: 'Log in to Twitch (Twitch Drops Farmer session)'
+      title: `Log in to Twitch (${BRAND_NAME} session)`
     });
     autoAuthWin.loadURL('https://www.twitch.tv/login');
     autoAuthWin.webContents.setAudioMuted(true);

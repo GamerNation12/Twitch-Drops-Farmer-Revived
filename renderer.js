@@ -1026,6 +1026,56 @@ if (btnCheckUpdate) {
     btnCheckUpdate.onclick = () => checkUpdates();
 }
 
+// LOCAL PATCH: the app's own window controls (the native title bar is hidden,
+// and the native titleBarOverlay buttons used to sit under this header).
+const MAXIMIZE_ICON = '<svg width="12" height="12" viewBox="0 0 12 12"><rect x="2.1" y="2.1" width="7.8" height="7.8" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>';
+const RESTORE_ICON = '<svg width="12" height="12" viewBox="0 0 12 12"><rect x="1.4" y="3.6" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M3.7 3.4V2.6a1.2 1.2 0 0 1 1.2-1.2h4.9a1.2 1.2 0 0 1 1.2 1.2v4.9a1.2 1.2 0 0 1-1.2 1.2h-.8" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>';
+
+const btnWinMinimize = document.getElementById('btnWinMinimize');
+if (btnWinMinimize) {
+    btnWinMinimize.onclick = () => window.electronAPI.minimizeWindow();
+}
+
+const btnWinMaximize = document.getElementById('btnWinMaximize');
+if (btnWinMaximize) {
+    btnWinMaximize.onclick = async () => {
+        const maximized = await window.electronAPI.toggleMaximizeWindow();
+        btnWinMaximize.innerHTML = maximized ? RESTORE_ICON : MAXIMIZE_ICON;
+        btnWinMaximize.title = maximized ? 'Restore' : 'Maximize';
+    };
+}
+
+const btnWinToTray = document.getElementById('btnWinToTray');
+if (btnWinToTray) {
+    // Minimise to the background: the window disappears into the tray and the
+    // app keeps farming. Click the tray icon (or launch the app again) to get
+    // the window back.
+    btnWinToTray.onclick = () => {
+        addLog('Minimized to the background — still farming. Click the tray icon to reopen.', 'system');
+        window.electronAPI.hideWindowToTray();
+    };
+}
+
+const btnWinClose = document.getElementById('btnWinClose');
+if (btnWinClose) {
+    // Same as before: hides to the tray so farming keeps running.
+    btnWinClose.onclick = () => window.electronAPI.hideWindowToTray();
+}
+
+// LOCAL PATCH: the header version badge was a hardcoded "v1.3" in index.html,
+// so it never followed the package version. Read the real one instead.
+(async () => {
+    try {
+        const badge = document.getElementById('headerBrandVersion');
+        if (badge && window.electronAPI.getAppVersion) {
+            const version = await window.electronAPI.getAppVersion();
+            if (version) badge.innerText = 'v' + version;
+        }
+    } catch (e) {
+        console.warn('Could not read app version:', e);
+    }
+})();
+
 const btnClearLogs = document.getElementById('btnClearLogs');
 if (btnClearLogs) {
     btnClearLogs.onclick = () => {
@@ -1051,6 +1101,138 @@ function semverCompare(a, b) {
 // LOCAL PATCH: update check now points at this fork's GitHub releases
 // (GamerNation12/Twitch-Drops-Farmer-Revived) instead of the dead upstream
 // repo, and it also runs by itself at startup and every 6 hours.
+
+// Where we remember "yes I saw this release, stop popping it up".
+const DISMISSED_UPDATE_KEY = 'dfr.dismissedUpdateVersion';
+
+function dismissedUpdateVersion() {
+    try { return localStorage.getItem(DISMISSED_UPDATE_KEY) || ''; } catch (e) { return ''; }
+}
+
+function dismissUpdateVersion(version) {
+    try {
+        if (version) localStorage.setItem(DISMISSED_UPDATE_KEY, version);
+        else localStorage.removeItem(DISMISSED_UPDATE_KEY);
+    } catch (e) { /* private mode etc - not important */ }
+}
+
+// GitHub release bodies are markdown. Escape everything first, then convert the
+// handful of things we actually use in release notes (headings, bullets, bold,
+// code, links) so a release can never inject HTML into the app window.
+function renderReleaseNotes(markdown) {
+    const esc = (s) => String(s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    const inline = (s) => esc(s)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+
+    const out = [];
+    let listOpen = false;
+    const closeList = () => { if (listOpen) { out.push('</ul>'); listOpen = false; } };
+
+    for (const raw of String(markdown || '').split(/\r?\n/)) {
+        const line = raw.trim();
+
+        if (!line) { closeList(); continue; }
+
+        if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) { closeList(); out.push('<hr>'); continue; }
+
+        const heading = line.match(/^(#{1,6})\s+(.*)$/);
+        if (heading) {
+            closeList();
+            const level = Math.min(Math.max(heading[1].length + 1, 2), 4); // # -> h2 ... #### -> h4
+            out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
+            continue;
+        }
+
+        const bullet = line.match(/^[-*+]\s+(.*)$/);
+        if (bullet) {
+            if (!listOpen) { out.push('<ul>'); listOpen = true; }
+            out.push(`<li>${inline(bullet[1])}</li>`);
+            continue;
+        }
+
+        closeList();
+        out.push(`<div style="margin: 6px 0;">${inline(line)}</div>`);
+    }
+    closeList();
+
+    return out.join('');
+}
+
+function showUpdateModal(info) {
+    const modal = document.getElementById('updateModal');
+    if (!modal || !info) return;
+
+    // Doubles as a "what's new in the version I already have" viewer.
+    const isUpdate = !!info.hasUpdate;
+
+    const title = document.getElementById('updateModalTitle');
+    if (title) title.innerText = isUpdate ? 'Update available' : `What's new in v${info.currentVersion}`;
+
+    const versions = document.getElementById('updateModalVersions');
+    if (versions) {
+        versions.innerText = isUpdate
+            ? `You have v${info.currentVersion} — v${info.latestVersion} is available`
+            : `You are on the latest version (v${info.currentVersion})`;
+    }
+
+    const notes = document.getElementById('updateModalNotes');
+    if (notes) {
+        const body = (info.notes || '').trim();
+        notes.innerHTML = body
+            ? renderReleaseNotes(body)
+            : '<div style="color: var(--text-muted);">This release has no notes attached — open the release page for details.</div>';
+    }
+
+    const skipVersion = document.getElementById('updateModalSkipVersion');
+    if (skipVersion) skipVersion.innerText = String(info.latestVersion);
+
+    const skip = document.getElementById('updateModalSkip');
+    if (skip) {
+        // Nothing to skip when there is no newer version to nag about.
+        const skipRow = skip.closest('.update-modal-skip');
+        if (skipRow) skipRow.style.display = isUpdate ? 'flex' : 'none';
+        skip.checked = isUpdate && dismissedUpdateVersion() === String(info.latestVersion);
+    }
+
+    const close = () => {
+        if (skip && isUpdate) {
+            if (skip.checked) dismissUpdateVersion(String(info.latestVersion));
+            else dismissUpdateVersion('');
+        }
+        modal.style.display = 'none';
+        document.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+
+    const btnLater = document.getElementById('btnUpdateLater');
+    if (btnLater) {
+        btnLater.innerText = 'Later';
+        btnLater.onclick = close;
+    }
+
+    const btnDownload = document.getElementById('btnUpdateDownload');
+    if (btnDownload) {
+        btnDownload.innerText = isUpdate ? `Download v${info.latestVersion}` : 'Open release page';
+        btnDownload.onclick = () => {
+            window.electronAPI.openExternal(info.downloadUrl || info.releaseUrl);
+            addLog(isUpdate
+                ? `[Updates] Opened the download for v${info.latestVersion}.`
+                : `[Updates] Opened the release page for v${info.currentVersion}.`, 'system');
+            close();
+        };
+    }
+
+    modal.onclick = (e) => { if (e.target === modal) close(); };
+    document.addEventListener('keydown', onKey);
+
+    modal.style.display = 'flex';
+    if (skip && isUpdate) skip.focus();
+}
+
 async function checkUpdates(silent = false) {
     const btn = document.getElementById('btnCheckUpdate');
     const notice = document.getElementById('updateNotice');
@@ -1072,16 +1254,25 @@ async function checkUpdates(silent = false) {
         }
 
         if (info.hasUpdate) {
-            notice.innerHTML = `<span style="color: var(--warning); cursor: pointer; text-decoration: underline;" title="Open the download page">Update available: v${info.latestVersion} (you have v${info.currentVersion}) - click to download</span>`;
-            notice.onclick = () => window.electronAPI.openExternal(info.downloadUrl || info.releaseUrl);
+            notice.innerHTML = `<span style="color: var(--warning); cursor: pointer; text-decoration: underline;" title="Show what's new / download">Update available: v${info.latestVersion} (you have v${info.currentVersion}) — click for details</span>`;
+            notice.onclick = () => showUpdateModal(info);
             addLog(`[Updates] New version v${info.latestVersion} is available (you have v${info.currentVersion}).`, 'system');
             showToast(`Update available: v${info.latestVersion}`, 'warn', 7000);
+
+            // Pop the changelog up by itself, unless this exact version was skipped.
+            // (A manual "Check Now" always shows it - you asked for it.)
+            if (!silent || dismissedUpdateVersion() !== String(info.latestVersion)) {
+                showUpdateModal(info);
+            }
         } else if (info.error) {
             notice.innerHTML = `<span style="color: var(--danger);">Could not check for updates: ${info.error}</span>`;
         } else if (info.reason === 'no-releases') {
             notice.innerHTML = `<span style="color: var(--text-secondary);">No releases published yet (running v${info.currentVersion}).</span>`;
         } else {
-            notice.innerHTML = `<span style="color: var(--success);">You have the latest version (v${info.currentVersion}).</span>`;
+            notice.innerHTML = `<span style="color: var(--success);">You have the latest version (v${info.currentVersion}).</span>`
+                + (info.notes ? ` <span id="updateChangelogLink" style="color: var(--accent-hover); cursor: pointer; text-decoration: underline;" title="Show the notes for this release">What's new?</span>` : '');
+            const changelogLink = document.getElementById('updateChangelogLink');
+            if (changelogLink) changelogLink.onclick = () => showUpdateModal(info);
             if (!silent) showToast('You are on the latest version', 'success');
         }
         return info;

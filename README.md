@@ -1,4 +1,4 @@
-# Twitch Drops Farmer Revived — v1.3.1
+# Twitch Drops Farmer Revived — v1.3.2
 
 A community-fixed, still-working build of **[lokalizator-repo/TwitchDropsFarmer](https://github.com/lokalizator-repo/TwitchDropsFarmer)** `v1.3.0`.
 
@@ -8,7 +8,7 @@ original features (auto-farming, campaign browser, inventory, priority queue, Di
 RPC, tray auto-start) are untouched.
 
 > If you are only here to *use* it, you don't need this repo — grab the built
-> `TwitchDropsFarmer_v1.3.1.exe` from the Releases page, or build it yourself
+> `TwitchDropsFarmer_v1.3.2.exe` from the Releases page, or build it yourself
 > (`npm install && npm run dist`).
 
 ---
@@ -23,6 +23,9 @@ RPC, tray auto-start) are untouched.
 | 4 | **No way to stay signed in.** The app has no browser UI for a normal Twitch sign-in, but farming needs the app's own profile to be a signed-in viewer (the hidden farm window only earns watch minutes for a logged-in session). | On startup the app reads the Twitch session already stored in its own profile and connects silently — no window, no tab, no code. If the profile has no session, sign in once with `--twitch-login` (see below). |
 | 5 | **"No campaigns found." / inventory icons missing.** A device-code login stored the *TV* client id as the GQL `Client-Id`; Twitch answers web queries sent with it using `dropCampaigns: null` **and no error**, so the app never refreshed its security token and showed nothing. | The GQL client id is pinned to the web client id (an already-stored TV id is migrated), a null/absent `dropCampaigns` now triggers a background security-token refresh, and the inventory asks for `gameEventDrops.imageURL` so every claimed drop shows its real artwork. |
 | 6 | **The update check pointed at the dead upstream repo.** | It now checks this repo's GitHub Releases (main process, so it can send a `User-Agent`), at startup and every 6 hours, and links straight to the new download. |
+| 7 | **No minimize button, and the app vanished to the tray when you clicked its taskbar icon.** The native title-bar overlay was covered by the app's own header, minimising was intercepted into a tray hide, and relaunching started a second miner. | The header carries its own minimize / **Background** / maximize / close buttons, a plain minimize stays in the taskbar, the labelled purple **Background** button sends the app to the tray (farming keeps running), and a single-instance lock means clicking the app icon again just brings the running window back. |
+| 8 | **The header said "Drops Farmer" with a hardcoded `v1.3` badge**, so it never matched the build you were actually running. | It reads **Drops Farmer Revived** and the badge is filled in from the app's own version (`v1.3.2`), which also means the tray tooltip and window title carry the real name. |
+| 9 | **You could not see what changed in an update** — an update was a one-line link in Settings. | A changelog popup shows the release notes in the app, with *Later*, *Download vX.Y.Z* and a *Skip this one* checkbox; when you are already up to date, *What's new?* in Settings shows the notes of the version you are running. |
 
 Details and the exact code changes are in [`docs/FIXES.md`](docs/FIXES.md).
 
@@ -46,9 +49,7 @@ npm run dist
 ```
 
 Shipping it to other people? [`docs/PUBLISH.md`](docs/PUBLISH.md) has the exact
-GitHub steps (repo + Release asset), and
-[`tools/Sign in to Twitch (first run).bat`](tools) is meant to sit next to the exe
-so a first-time user only has to double-click one file.
+GitHub steps (repo + Release asset).
 
 ---
 

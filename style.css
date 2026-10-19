@@ -98,6 +98,7 @@ h1, h2, h3, h4, h5, h6 {
   border-bottom: 1px solid var(--border-color);
   z-index: 1000;
   user-select: none;
+  position: relative; /* LOCAL PATCH: anchor for the centred farm pill */
 }
 
 .header-brand {
@@ -126,7 +127,7 @@ h1, h2, h3, h4, h5, h6 {
   background: var(--accent-light);
   padding: 1px 6px;
   border-radius: 6px;
-  text-transform: uppercase;
+  text-transform: none; /* LOCAL PATCH: renderer fills this in as "v1.3.1" */
 }
 
 /* Header Live Farm Mini-Widget */
@@ -141,6 +142,11 @@ h1, h2, h3, h4, h5, h6 {
   border-radius: 30px;
   transition: all 0.25s ease;
   max-width: 440px;
+  /* LOCAL PATCH: keep it dead-centre in the header instead of drifting with
+     however wide the brand / user clusters happen to be */
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .header-farm-pill:hover {
@@ -223,13 +229,119 @@ h1, h2, h3, h4, h5, h6 {
   color: white;
 }
 
-/* Header Right User Controls - Shifted to clear Windows Native Titlebar Buttons */
+/* Header Right User Controls */
 .header-right {
   -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-right: 140px; /* Space for Electron Windows native titleBarOverlay controls */
+  margin-left: auto;
+  margin-right: 0; /* the app's own window controls sit to the right of this */
+}
+
+/* LOCAL PATCH: window controls (minimise / to background / maximise / close).
+   The native title bar is hidden, so the app draws its own, styled to match the
+   rest of the glass/purple UI instead of floating on the header bare. */
+.window-controls {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 10px;
+  padding: 3px;
+  border-radius: 17px;
+  background: linear-gradient(180deg, rgba(20, 22, 32, 0.95), rgba(9, 10, 15, 0.95));
+  border: 1px solid var(--border-color);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
+.win-ctrl {
+  width: 34px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease,
+    box-shadow 0.18s ease, transform 0.12s ease;
+}
+
+.win-ctrl svg {
+  transition: filter 0.18s ease, transform 0.18s ease;
+}
+
+.win-ctrl:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+.win-ctrl:hover svg {
+  transform: scale(1.08);
+}
+
+.win-ctrl:active {
+  transform: translateY(0) scale(0.95);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+
+/* "send it to the background" - the one you press while farming keeps running.
+   Labelled on purpose: a bare icon left people guessing what it did. */
+.win-ctrl-tray {
+  width: auto;
+  padding: 0 10px;
+  gap: 5px;
+  color: #c084fc;
+  background: radial-gradient(circle at 50% 130%, rgba(145, 70, 255, 0.3), transparent 72%);
+}
+
+.win-ctrl-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  line-height: 1;
+}
+
+.win-ctrl-tray:hover {
+  background: linear-gradient(180deg, rgba(145, 70, 255, 0.5), rgba(145, 70, 255, 0.18));
+  border-color: rgba(168, 85, 247, 0.75);
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(145, 70, 255, 0.5);
+}
+
+.win-ctrl-tray:hover svg {
+  filter: drop-shadow(0 0 6px rgba(192, 132, 252, 0.9));
+}
+
+/* maximise / restore gets a cool blue tint */
+#btnWinMaximize:hover {
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.3), rgba(56, 189, 248, 0.1));
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #e0f2fe;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.32);
+}
+
+#btnWinMaximize:hover svg {
+  filter: drop-shadow(0 0 5px rgba(125, 211, 252, 0.8));
+}
+
+/* close / hide to tray gets the red treatment */
+.win-ctrl-close:hover {
+  background: linear-gradient(180deg, rgba(239, 68, 68, 0.8), rgba(239, 68, 68, 0.45));
+  border-color: rgba(248, 113, 113, 0.85);
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.5);
+}
+
+.win-ctrl-close:hover svg {
+  filter: drop-shadow(0 0 5px rgba(254, 202, 202, 0.85));
 }
 
 .header-user-widget {
@@ -1529,4 +1641,151 @@ input[type=number] {
   color: #e2e8f0;
   padding: 10px;
   font-weight: 600;
+}
+
+/* LOCAL PATCH: update / changelog popup ------------------------------- */
+.update-modal-card {
+  max-width: 560px;
+  padding: 24px;
+  border-radius: 24px;
+  border: 1px solid rgba(145, 70, 255, 0.28);
+  background: linear-gradient(180deg, #11121c 0%, #090a0f 100%);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 40px rgba(145, 70, 255, 0.12);
+}
+
+.update-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.update-modal-icon {
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(145, 70, 255, 0.14);
+  border: 1px solid rgba(145, 70, 255, 0.35);
+  box-shadow: 0 0 18px rgba(145, 70, 255, 0.25);
+}
+
+.update-modal-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: -0.3px;
+}
+
+.update-modal-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.update-modal-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--accent-hover);
+  margin-bottom: 8px;
+}
+
+.update-modal-notes {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-color);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.update-modal-notes h2,
+.update-modal-notes h3,
+.update-modal-notes h4 {
+  margin: 14px 0 6px;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.update-modal-notes h2:first-child,
+.update-modal-notes h3:first-child,
+.update-modal-notes h4:first-child {
+  margin-top: 0;
+}
+
+.update-modal-notes strong { color: #ffffff; }
+
+.update-modal-notes code {
+  background: rgba(145, 70, 255, 0.18);
+  color: #e9d5ff;
+  padding: 1px 5px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.update-modal-notes a { color: var(--accent-hover); }
+
+.update-modal-notes ul {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.update-modal-notes li { margin: 3px 0; }
+
+.update-modal-notes hr {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 12px 0;
+}
+
+.update-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.update-modal-skip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.update-modal-skip input {
+  accent-color: var(--accent-color);
+  cursor: pointer;
+}
+
+.update-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.update-modal-actions .btn-primary,
+.update-modal-actions .btn-secondary {
+  width: auto;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 700;
 }

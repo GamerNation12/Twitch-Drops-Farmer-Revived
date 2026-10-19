@@ -39,8 +39,9 @@ minutes.
 Smoke-test before publishing:
 
 1. Run the exe — the app window opens. (No black screen: that is fix #1.)
-2. If the app does not show your account, run it once with `--twitch-login`
-   (or use `tools\Sign in to Twitch (first run).bat`) and sign in.
+2. If the app does not show your account, run it once with `--twitch-login` and sign
+   in (or use the **Login** button in the header: the activation code is copied to
+   your clipboard automatically).
 3. Console tab: campaigns load, no `AUTH_EXPIRED` / `invalid client` errors.
 
 ## 3. Attach the exe to a Release
@@ -48,18 +49,17 @@ Smoke-test before publishing:
 GitHub rejects files over 100 MB inside the repository, but a **release asset** may
 be up to 2 GB — so the exe goes into a Release, not into git.
 
-Web UI: **Releases → Draft a new release**, tag `v1.3.1`, paste the notes from
-`docs\RELEASE-NOTES-v1.3.1.md`, then drag in
-`dist\TwitchDropsFarmer_v1.3.1.exe` and `tools\Sign in to Twitch (first run).bat`.
+Web UI: **Releases → Draft a new release**, tag `v1.3.2`, paste the notes from
+`docs\RELEASE-NOTES-v1.3.2.md`, then drag in `dist\TwitchDropsFarmer_v1.3.2.exe`.
 
 Or from the command line (GitHub CLI):
 
 ```powershell
-gh release create v1.3.1 `
-  "dist\TwitchDropsFarmer_v1.3.1.exe" `
-  "tools\Sign in to Twitch (first run).bat" `
-  --title "v1.3.1 - fixed build" `
-  --notes-file docs\RELEASE-NOTES-v1.3.1.md
+gh release create v1.3.2 `
+  "dist\TwitchDropsFarmer_v1.3.2.exe" `
+  --title "v1.3.2 - window controls, branding, changelog popup" `
+  --notes-file docs\RELEASE-NOTES-v1.3.2.md
 ```
 
-Anyone can then download the exe, run it, and use the sign-in `.bat` once.
+Anyone can then download the exe, run it, and press **Login** in the header if the
+app profile has no Twitch session yet (the activation code goes to the clipboard).

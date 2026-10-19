@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <title>Twitch Drops Farmer</title>
+  <title>Drops Farmer Revived</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -15,8 +15,8 @@
   <header class="app-header">
     <div class="header-brand">
       <img src="assets/icon.png" alt="Logo">
-      <span class="header-brand-title">Drops Farmer</span>
-      <span class="header-brand-version">v1.3</span>
+      <span class="header-brand-title">Drops Farmer Revived</span>
+      <span class="header-brand-version" id="headerBrandVersion" title="App version">v1.3.1</span>
     </div>
 
     <!-- Persistent Active Farm Status Pill (Center Header) -->
@@ -40,6 +40,23 @@
         <span id="headerUserText" style="color: var(--text-secondary);">Not Connected</span>
         <button id="loginBtn" class="btn-primary" style="padding: 4px 10px; font-size: 11px; width: auto; border-radius: 12px;">Login</button>
       </div>
+    </div>
+
+    <!-- LOCAL PATCH: real window controls (the native title bar is hidden) -->
+    <div class="window-controls">
+      <button id="btnWinMinimize" class="win-ctrl" title="Minimize">
+        <svg width="12" height="12" viewBox="0 0 12 12"><rect x="1.6" y="5.4" width="8.8" height="1.2" rx="0.6" fill="currentColor"/></svg>
+      </button>
+      <button id="btnWinToTray" class="win-ctrl win-ctrl-tray" title="Minimize to the background (tray) - farming keeps running">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 1.5v5.1"/><path d="M3.5 4.4L6 6.9l2.5-2.5"/><path d="M1.5 8.6h9"/></svg>
+        <span class="win-ctrl-label">Background</span>
+      </button>
+      <button id="btnWinMaximize" class="win-ctrl" title="Maximize">
+        <svg width="12" height="12" viewBox="0 0 12 12"><rect x="2.1" y="2.1" width="7.8" height="7.8" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>
+      </button>
+      <button id="btnWinClose" class="win-ctrl win-ctrl-close" title="Hide to tray (farming keeps running)">
+        <svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </button>
     </div>
   </header>
 
@@ -537,6 +554,35 @@
 
       <div class="modal-footer" style="display: flex; justify-content: flex-end; align-items: center; margin-top: 15px; border-top: 1px solid var(--border-color); padding-top: 15px;">
         <button id="btnCloseDeviceAuthModal" class="btn-secondary" style="padding: 8px 18px; font-size: 13px; width: auto;">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOCAL PATCH: update / changelog popup -->
+  <div id="updateModal" class="modal-overlay" style="display: none;">
+    <div class="modal-card update-modal-card">
+      <div class="update-modal-head">
+        <div class="update-modal-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/><path d="M12 7.5v5.5"/><path d="M12 16.5h.01"/></svg>
+        </div>
+        <div style="min-width: 0;">
+          <h2 class="update-modal-title" id="updateModalTitle">Update available</h2>
+          <div class="update-modal-sub" id="updateModalVersions">—</div>
+        </div>
+      </div>
+
+      <div class="update-modal-label">What's new</div>
+      <div class="update-modal-notes" id="updateModalNotes">—</div>
+
+      <div class="update-modal-foot">
+        <label class="update-modal-skip" title="Hide this popup until the next version comes out">
+          <input type="checkbox" id="updateModalSkip" />
+          <span>Skip this one (v<span id="updateModalSkipVersion">—</span>)</span>
+        </label>
+        <div class="update-modal-actions">
+          <button id="btnUpdateLater" class="btn-secondary">Later</button>
+          <button id="btnUpdateDownload" class="btn-primary">Download update</button>
+        </div>
       </div>
     </div>
   </div>
