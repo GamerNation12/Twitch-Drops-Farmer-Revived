@@ -54,7 +54,11 @@ let isQuitting = false;
  */
 function buildHeaders(tokens) {
   const headers = {
-    'Client-Id': tokens.clientId || 'ue6666qo983tsx6so1t0vnawi233wa',
+    // LOCAL PATCH: this is the *web* client id, not the TV one. Every query
+    // this app sends (ViewerDropsDashboard, Inventory, ...) is a web-client
+    // query; sending them with the TV client id makes Twitch answer
+    // dropCampaigns: null without any error, which looks like "no campaigns".
+    'Client-Id': tokens.clientId || 'kimne78kx3ncx6brgo4mv6wki5h1ko',
     'Authorization': tokens.auth,
     'Content-Type': 'application/json'
   };

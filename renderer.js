@@ -656,6 +656,18 @@ if (btnNavSettings) btnNavSettings.onclick = () => switchView('settings');
 if (btnNavLogs) btnNavLogs.onclick = () => switchView('logs');
 
 let accountTokens = JSON.parse(localStorage.getItem('accountTokens') || 'null');
+
+// LOCAL PATCH: the GQL client id must always be the *web* client id, because
+// every query this app sends is a web-client query. An earlier build of this
+// fork stored the TV client id here after a device-code login; with that id
+// Twitch answers dropCampaigns: null and no error at all, so the app showed
+// "No campaigns found." and never tried to refresh its security token.
+const WEB_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
+if (accountTokens && accountTokens.clientId !== WEB_CLIENT_ID) {
+    console.warn(`[GQL] Replacing stored client id ${accountTokens.clientId} with the web client id`);
+    accountTokens.clientId = WEB_CLIENT_ID;
+    localStorage.setItem('accountTokens', JSON.stringify(accountTokens));
+}
 let allCampaigns = [];
 let filteredCampaigns = [];
 let autoClaimEnabled = localStorage.getItem('autoClaimEnabled') !== 'false';
@@ -675,6 +687,7 @@ let currentUserId = null;
 let wsDropProgress = {};
 let uiTimerInterval = null;
 let integritySafetyTimer = null;
+let lastIntegrityKick = 0;   // rate-limits the automatic security-token refresh
 
 function fixTwitchUrl(url, w, h) {
     if (!url) return '';
@@ -1937,6 +1950,28 @@ async function fetchAndUpdateCampaigns() {
             userData = response?.data?.currentUser;
         }
 
+        // LOCAL PATCH: dropCampaigns coming back null/absent means Twitch
+        // refused this web query - in practice a missing or stale integrity
+        // token (the TV client id has the same effect, see WEB_CLIENT_ID).
+        // Kick the security refresh instead of silently showing an empty list.
+        const campaignDataMissing = !userData || userData.dropCampaigns == null;
+        if (campaignDataMissing && accountTokens && accountTokens.auth && Date.now() - lastIntegrityKick > 60000) {
+            lastIntegrityKick = Date.now();
+            addLog('🔒 [Security] Refreshing Twitch security token in background...', 'info');
+            window.electronAPI.refreshIntegrityToken();
+            showLoadingPlaceholder("Validating security token in background...");
+
+            if (integritySafetyTimer) clearTimeout(integritySafetyTimer);
+            integritySafetyTimer = setTimeout(() => {
+                const c = document.getElementById('campaignsContainer');
+                if (c && (!allCampaigns || allCampaigns.length === 0)) {
+                    showIntegrityFailedUI();
+                }
+            }, 14000);
+
+            return false;
+        }
+
         if (!userData) {
             console.warn("No userData found", response);
             renderCampaignsListItems();
@@ -2157,11 +2192,24 @@ async function startDeviceAuthFlow() {
 
                     const tokens = {
                         auth: `OAuth ${tokenRes.access_token}`,
-                        clientId: 'ue6666qo983tsx6so1t0vnawi233wa',
-                        integrity: accountTokens?.integrity || ''
+                        // LOCAL PATCH: the device flow has to use the TV client
+                        // id to hand out a token, but the GQL client id has to
+                        // stay the web one, so it is pinned here instead of
+                        // being copied from the TV login.
+                        clientId: WEB_CLIENT_ID,
+                        integrity: accountTokens?.integrity || '',
+                        deviceId: accountTokens?.deviceId || ''
                     };
                     tokenProcessingStarted = false;
                     processTokens(tokens);
+
+                    // The stored web session is what carries the query
+                    // permissions and counts watch minutes, so refresh the
+                    // security/session tokens right after a device login
+                    // instead of waiting for the first failed campaign poll.
+                    setTimeout(() => {
+                        try { window.electronAPI.refreshIntegrityToken(); } catch (e) { /* ignore */ }
+                    }, 1000);
                 } else if (tokenRes.error && tokenRes.error !== 'authorization_pending') {
                     clearInterval(deviceAuthPollInterval);
                     deviceAuthPollInterval = null;
@@ -3483,7 +3531,11 @@ async function renderInventory() {
 
         groups[gameName].rewards.push({
             ...item,
-            image: itemImageMap.get(item.id) || null
+            // LOCAL PATCH: gameEventDrops carries its own imageURL, so claimed
+            // drops show their real artwork even when the campaign they came
+            // from is long gone (the campaign-based lookup only ever covered
+            // currently listed campaigns).
+            image: item.imageURL || itemImageMap.get(item.id) || null
         });
     });
 
