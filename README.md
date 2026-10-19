@@ -1,6 +1,6 @@
-# Twitch Drops Farmer PRO — fixed build (v1.3.1)
+# Twitch Drops Farmer Revived — v1.3.1
 
-A community-fixed fork of **[lokalizator-repo/TwitchDropsFarmer](https://github.com/lokalizator-repo/TwitchDropsFarmer)** `v1.3.0`.
+A community-fixed, still-working build of **[lokalizator-repo/TwitchDropsFarmer](https://github.com/lokalizator-repo/TwitchDropsFarmer)** `v1.3.0`.
 
 The upstream `v1.3.0` release does not run on most Windows machines and cannot log in
 any more. This version fixes both problems, plus the login/auto-connect flow. All the
@@ -31,8 +31,8 @@ Details and the exact code changes are in [`docs/FIXES.md`](docs/FIXES.md).
 Requirements: **Node.js 18+** and Windows x64.
 
 ```powershell
-git clone <your-fork-url> twitchdropsfarmer-fixed
-cd twitchdropsfarmer-fixed
+git clone https://github.com/GamerNation12/Twitch-Drops-Farmer-Revived.git
+cd Twitch-Drops-Farmer-Revived
 npm install
 npm start
 ```
