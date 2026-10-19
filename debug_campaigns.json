@@ -1,0 +1,13 @@
+{
+  "data": {
+    "currentUser": {
+      "dropCurrentSession": null,
+      "dropCampaigns": null
+    }
+  },
+  "extensions": {
+    "durationMilliseconds": 11,
+    "requestID": "01M599AB3V41TBE9908EN6P33G",
+    "operationName": "ViewerDropsDashboard"
+  }
+}

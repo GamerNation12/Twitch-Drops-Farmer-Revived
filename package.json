@@ -1,0 +1,61 @@
+{
+  "name": "twitch-drop-farmer",
+  "version": "1.3.1",
+  "description": "Auto Farm Twitch Drops Dashboard (community-fixed build)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:signin": "electron . --twitch-login",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.twitch.drops.farmer.pro",
+    "productName": "Twitch Drops Farmer PRO",
+    "artifactName": "TwitchDropsFarmer_v${version}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "signingHashAlgorithms": null,
+      "sign": null
+    },
+    "files": [
+      "main.js",
+      "renderer.js",
+      "preload.js",
+      "index.html",
+      "style.css",
+      "gql-manager.js",
+      "websocket-manager.js",
+      "discord-rpc-manager.js",
+      "gql-queries.json",
+      "assets/**/*",
+      "node_modules/ws/**/*"
+    ],
+    "asar": true,
+    "compression": "maximum",
+    "nsis": {
+      "oneClick": true,
+      "allowToChangeInstallationDirectory": false
+    }
+  },
+  "author": "Lokalizator",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}
