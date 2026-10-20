@@ -466,18 +466,58 @@ The updater script logs to `%TEMP%\dfr-update.log`:
 
 Both paths verify before they touch anything that works:
 
-* the download is hashed **while streaming and again off disk** and must match the
-  `sha256:` GitHub publishes for the asset (`check-for-updates` returns it); a mismatch, a
-  size that disagrees with `content-length`, a file under 10 MB, or a file that does not
-  start with `MZ` is discarded. Everything is logged to `%TEMP%\dfr-download.log`, and the
-  download is retried once on a fresh path (`...-retry2.exe`) because a leftover or locked
-  file in `%TEMP%` is a real failure mode - that retry plus the disk hash was added after a
-  test machine produced a correctly-sized download whose bytes did not match the release;
+* the download is written through `stream/promises.pipeline()` — which only resolves once
+  the destination file has been closed — and the **finished file is hashed from disk** and
+  must match the `sha256:` GitHub publishes for the asset (`check-for-updates` returns it);
+  a mismatch, a size that disagrees with `content-length`, a file under 10 MB, or a file
+  that does not start with `MZ` is discarded. Everything is logged to
+  `%TEMP%\dfr-download.log`, and the download is retried once on a fresh path
+  (`...-retry2.exe`). That replaced an earlier version that hashed the stream *and* read
+  the file back immediately: a real 1.3.3 Setup download then produced the correct stream
+  hash but a wrong on-disk hash twice in a row (right size, different bytes), so the check
+  was right to refuse it — but the race is gone now that the hash is taken from a closed
+  file;
 * the portable swap stages the new exe as `<exe>.new` **next to** the target, verifies that
   staged file, and only then moves it over the real exe;
 * the installed build verifies the Setup's hash before running it.
 
 If verification fails the app simply keeps running the version it has.
+
+---
+
+## 16. Priority games: search the whole directory, with real box art (`main.js`, `preload.js`, `renderer.js`)
+
+The priority list only ever saw games that came back in `ViewerDropsDashboard`, i.e. games
+that have a drop campaign *right now*. Two consequences:
+
+* typing the name of any other game in **Settings → Priority Auto-Farm Games** found
+  nothing, so it had to be typed exactly and blindly;
+* the chips got their icon from `allCampaigns.find(...)`, so a game without a campaign
+  showed the placeholder rectangle (Marvel Rivals had art, Fortnite and Rocket League did
+  not).
+
+`search-games` (main process) now posts a `SearchCategories` query to
+`https://gql.twitch.tv/gql` with the public web `Client-Id` and **no Authorization header**
+— Twitch's directory search is public, so it works before login and cannot break the
+app's session. It returns `{ id, name, displayName, boxArtURL }` and caches answers for 10
+minutes (max 200 queries).
+
+In the renderer:
+
+* `renderPriorityGrid()` merges the campaign games with the directory results for the typed
+  name (deduplicated by display name). Directory-only games get a small **no drops** tag
+  instead of being invisible. Results for a term that is no longer in the box are dropped,
+  so a slow answer cannot overwrite newer results.
+* the search is debounced (260 ms, minimum 2 characters) and only the newest request is
+  allowed to render (`gameSearchSeq`).
+* `gameArtCache` (localStorage) remembers `{ id, boxArtURL, displayName }` per game as soon
+  as it is seen — from the campaign feed *or* from a search result. `renderPriorityChips()`
+  reads that cache, so chips have real artwork without any campaign, and the icons are
+  still there on the next launch (offline included).
+* every priority game with no cached art is looked up in the background, one request at a
+  time (`queueArtLookup`), and the chips re-render as each icon arrives.
+* `loading="lazy"` on the grid images, and the old `onerror` fallback that substituted an
+  unrelated game's box art is gone — a failed image now just fades out.
 
 ---
 
@@ -557,3 +597,17 @@ If verification fails the app simply keeps running the version it has.
   both update modes, the Setup/portable asset choice, the digest + staged-swap verification
   and the NSIS build config; both `dist\TwitchDropsFarmer_v1.3.3.exe` (70.2 MB) and
   `dist\TwitchDropsFarmer_Setup_v1.3.3.exe` (70.4 MB) are present and over 50 MB.
+* Game directory search, live: the anonymous `SearchCategories` call (web Client-Id, no
+  Authorization) returned Fortnite (`33214`); in the running 1.3.4 dev app, typing
+  `rocket league` into Settings produced Rocket League (`30921`) plus four other matching
+  titles, all with `ttv-boxart` images that loaded (`naturalWidth > 0`), each tagged
+  **no drops** — none of them are in the current campaign feed.
+* Priority icons, live: the three existing chips (Fortnite, Marvel Rivals, Rocket League)
+  changed from the placeholder rectangle to `33214-36x48.jpg`, `1264310518_IGDB-36x48.jpg`
+  and `30921-36x48.jpg`, all loaded, with no campaign needed for two of them.
+* Download integrity, live (the exact case that failed before): the 73,838,799-byte
+  `TwitchDropsFarmer_Setup_v1.3.3.exe` downloaded twice through the new `pipeline()` path
+  and the on-disk SHA-256 matched the published digest both times; the 73,566,359-byte
+  portable asset matched three times out of three.
+* `verify-build.mjs` on 1.3.4: all checks pass, including the new `search-games` handler,
+  the icon cache and the `pipeline` downloader.

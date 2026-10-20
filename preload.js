@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // GQL Queries
   getCampaigns: (tokens) => ipcRenderer.invoke('fetch-campaigns', tokens),
+  searchGames: (query) => ipcRenderer.invoke('search-games', query),
   fetchCampaignDetails: (campaignId, tokens) => ipcRenderer.invoke('fetch-campaign-details', campaignId, tokens),
   findStreamer: (gameName, tokens, whitelistedLogins = null) => ipcRenderer.invoke('find-streamer', gameName, tokens, whitelistedLogins),
   checkChannelDrops: (channelId, tokens) => ipcRenderer.invoke('check-channel-drops', channelId, tokens),

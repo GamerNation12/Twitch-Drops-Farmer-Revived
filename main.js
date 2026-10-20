@@ -2,7 +2,8 @@ const { app, BrowserWindow, session, ipcMain, Tray, Menu, nativeImage, shell, cl
 const path = require('node:path')
 const fs = require('fs')
 const { spawn } = require('node:child_process')
-const { Readable } = require('node:stream')
+const { Readable, Transform } = require('node:stream')
+const { pipeline } = require('node:stream/promises')
 const crypto = require('node:crypto')
 
 ipcMain.on('open-external', (event, url) => {
@@ -543,38 +544,33 @@ ipcMain.handle('download-update', async (event, opts = {}) => {
     if (!res.ok || !res.body) throw new Error(`Download failed (HTTP ${res.status}).`);
 
     const total = Number(res.headers.get('content-length')) || 0;
-    const nodeStream = Readable.fromWeb(res.body);
-    const fileStream = fs.createWriteStream(dest);
-    // Hash while streaming so the finished file can be checked against the
-    // sha256 GitHub publishes for the release asset.
-    const hasher = crypto.createHash('sha256');
 
+    // Count the bytes on the way through, then hash the finished file from disk.
+    // pipeline() only resolves once the destination has been closed, so the file
+    // we hash is the complete file - a plain 'finish' handler can fire while the
+    // last writes are still in flight, which is how a download can hash correctly
+    // in memory but differ on disk (seen on a real 1.3.3 update).
     let received = 0;
     let lastTick = 0;
-    nodeStream.on('data', (chunk) => {
-      received += chunk.length;
-      hasher.update(chunk);
-      const now = Date.now();
-      if (now - lastTick > 200) {
-        lastTick = now;
-        send({ received, total, percent: total ? Math.min(100, Math.round((received / total) * 100)) : 0 });
+    const counter = new Transform({
+      transform(chunk, enc, cb) {
+        received += chunk.length;
+        const now = Date.now();
+        if (now - lastTick > 200) {
+          lastTick = now;
+          send({ received, total, percent: total ? Math.min(100, Math.round((received / total) * 100)) : 0 });
+        }
+        cb(null, chunk);
       }
     });
 
-    await new Promise((resolve, reject) => {
-      nodeStream.pipe(fileStream);
-      fileStream.on('finish', resolve);
-      fileStream.on('error', reject);
-      nodeStream.on('error', reject);
-    });
+    await pipeline(Readable.fromWeb(res.body), counter, fs.createWriteStream(dest));
 
     const size = fs.existsSync(dest) ? fs.statSync(dest).size : 0;
-    const streamHash = hasher.digest('hex');
-    // Hash the file again off disk: the file is what gets installed, so it has
-    // to match too.
+    // The file on disk is what gets installed, so that is what gets hashed.
     let diskHash = '';
     try { diskHash = crypto.createHash('sha256').update(fs.readFileSync(dest)).digest('hex'); } catch (e) {}
-    logLine(`[${new Date().toISOString()}] ${path.basename(dest)} expected=${expected || '-'} stream=${streamHash} disk=${diskHash} size=${size} total=${total}`);
+    logLine(`[${new Date().toISOString()}] ${path.basename(dest)} expected=${expected || '-'} disk=${diskHash} size=${size} total=${total}`);
 
     // A truncated or corrupted download must never be installed over a working exe.
     if (total && size !== total) throw new Error(`The download stopped early (${size} of ${total} bytes).`);
@@ -591,8 +587,8 @@ ipcMain.handle('download-update', async (event, opts = {}) => {
     } catch (e) { /* the size checks above already passed */ }
     if (head && head !== 'MZ') throw new Error('The downloaded file is not a Windows program.');
 
-    if (expected && (streamHash !== expected || (diskHash && diskHash !== expected))) {
-      console.error(`[Updates] checksum mismatch: expected ${expected}, stream ${streamHash}, disk ${diskHash}`);
+    if (expected && diskHash !== expected) {
+      console.error(`[Updates] checksum mismatch: expected ${expected}, disk ${diskHash}`);
       throw new Error('checksum mismatch');
     }
 
@@ -846,6 +842,67 @@ ipcMain.handle('claim-drop', async (event, dropInstanceId, tokens) => {
   return await gql.execute('ClaimDrop', {
     input: { dropInstanceID: dropInstanceId }
   }, buildHeaders(tokens));
+});
+
+// LOCAL PATCH: game directory search ------------------------------------------
+// The priority list used to know only about games that currently have a drop
+// campaign, so a game without drops had no box art and could not be found by
+// searching. Twitch's public web GraphQL lets us search the whole game
+// directory anonymously (no login), which the renderer uses for the search
+// results and for the icon of any game already in the priority list.
+const GAME_SEARCH_TTL_MS = 10 * 60 * 1000;
+const gameSearchCache = new Map(); // lowercased query -> { at, games }
+
+ipcMain.handle('search-games', async (event, query) => {
+  const q = String(query || '').trim();
+  if (q.length < 2) return { games: [] };
+
+  const key = q.toLowerCase();
+  const cached = gameSearchCache.get(key);
+  if (cached && Date.now() - cached.at < GAME_SEARCH_TTL_MS) return { games: cached.games };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch('https://gql.twitch.tv/gql', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Client-Id': 'kimne78kx3ncx6brgo4mv6wki5h1ko',
+        'Content-Type': 'application/json',
+        'User-Agent': 'Twitch-Drops-Farmer-Revived'
+      },
+      body: JSON.stringify({
+        operationName: 'SearchCategories',
+        variables: { query: q, first: 12 },
+        query: `query SearchCategories($query: String!, $first: Int) { searchCategories(query: $query, first: $first) { edges { node { id name displayName boxArtURL } } } }`
+      })
+    });
+
+    if (!res.ok) return { games: [], error: `Game search failed (HTTP ${res.status}).` };
+
+    const data = await res.json();
+    const edges = (data && data.data && data.data.searchCategories && data.data.searchCategories.edges) || [];
+    const games = edges
+      .map((edge) => edge && edge.node)
+      .filter((node) => node && node.id && node.displayName)
+      .map((node) => ({
+        id: String(node.id),
+        name: node.name || '',
+        displayName: node.displayName,
+        boxArtURL: node.boxArtURL || ''
+      }));
+
+    gameSearchCache.set(key, { at: Date.now(), games });
+    if (gameSearchCache.size > 200) {
+      gameSearchCache.delete(gameSearchCache.keys().next().value); // oldest entry
+    }
+    return { games };
+  } catch (e) {
+    return { games: [], error: (e && e.message) || 'Game search failed.' };
+  } finally {
+    clearTimeout(timer);
+  }
 });
 
 ipcMain.handle('find-streamer', async (event, gameName, tokens, whitelistedLogins = null) => {

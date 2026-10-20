@@ -661,6 +661,7 @@ function switchView(viewName) {
             // when nobody was looking at it).
             renderPriorityChips();
             renderPriorityGrid(autoFarmSearch ? autoFarmSearch.value : '');
+            scheduleGameSearch(autoFarmSearch ? autoFarmSearch.value : '');
         }
         if (viewName === 'logs' && viewLogs) { viewLogs.style.display = 'block'; btnNavLogs.classList.add('active'); }
     } catch (e) {
@@ -1420,8 +1421,12 @@ function addCustomGame() {
     if (!selectedPriorityGames.some(g => g.toLowerCase() === val.toLowerCase())) {
         selectedPriorityGames.push(val);
         savePriorityGames();
-        renderPriorityChips();
+        renderPriorityChips(); // also looks the game up so the chip gets its icon
         autoFarmSearch.value = '';
+        clearTimeout(gameSearchTimer);
+        gameSearchSeq++;
+        remoteGameResults = [];
+        remoteGameTerm = '';
         renderPriorityGrid();
         showToast(`Added ${val} to priority list`, 'success');
     }
@@ -1435,6 +1440,89 @@ function updatePriorityStatsCount() {
     }
 }
 
+// LOCAL PATCH: box art for priority games --------------------------------
+// The priority list is not limited to games that have an active drop, so its
+// icons cannot come from the campaign list alone. Twitch's public game search
+// gives us the box art for any game; the result is remembered so the chips show
+// their icons immediately on the next launch (and keep them offline).
+const GAME_ART_KEY = 'gameArtCache';
+let gameArtCache = {};
+try { gameArtCache = JSON.parse(localStorage.getItem(GAME_ART_KEY) || '{}') || {}; } catch (e) { gameArtCache = {}; }
+let gameArtDirty = false;
+
+function saveGameArtCache() {
+    if (!gameArtDirty) return;
+    try { localStorage.setItem(GAME_ART_KEY, JSON.stringify(gameArtCache)); } catch (e) { }
+    gameArtDirty = false;
+}
+
+function rememberGameArt(game) {
+    if (!game || !game.displayName || (!game.boxArtURL && !game.id)) return;
+    const key = game.displayName.toLowerCase();
+    const prev = gameArtCache[key] || {};
+    // Keep the richer of the two (a campaign game has an id, a search result has
+    // the box art template).
+    const next = {
+        id: String(game.id || prev.id || ''),
+        name: game.name || prev.name || '',
+        displayName: game.displayName,
+        boxArtURL: game.boxArtURL || prev.boxArtURL || ''
+    };
+    if (prev.id === next.id && prev.boxArtURL === next.boxArtURL) return;
+    gameArtCache[key] = next;
+    gameArtDirty = true;
+}
+
+function gameArtFor(name) {
+    const key = String(name || '').trim().toLowerCase();
+    if (!key) return null;
+    const art = gameArtCache[key];
+    if (art && (art.boxArtURL || art.id)) return art;
+    const camp = allCampaigns.find(c => c.game && c.game.displayName && c.game.displayName.toLowerCase() === key);
+    return camp ? camp.game : null;
+}
+
+// Resolve the icon of every priority game that we have never looked up, one at
+// a time so a long list does not hit Twitch with a burst of requests.
+const artLookupsTried = new Set();
+const artLookupQueue = [];
+let artLookupRunning = false;
+
+function queueArtLookup(name) {
+    const key = String(name || '').trim().toLowerCase();
+    if (!key || artLookupsTried.has(key)) return;
+    if (gameArtFor(key)) return;
+    if (artLookupQueue.some(n => n.toLowerCase() === key)) return;
+    artLookupQueue.push(name);
+    runArtLookups();
+}
+
+function resolvePriorityArt() {
+    selectedPriorityGames.forEach(queueArtLookup);
+}
+
+async function runArtLookups() {
+    if (artLookupRunning) return;
+    artLookupRunning = true;
+    while (artLookupQueue.length) {
+        const name = artLookupQueue.shift();
+        const key = name.toLowerCase();
+        artLookupsTried.add(key);
+        try {
+            const res = await window.electronAPI.searchGames(name);
+            const games = (res && res.games) || [];
+            // Exact name first, otherwise trust Twitch's ranking.
+            const exact = games.find(g => g.displayName.toLowerCase() === key || String(g.name || '').toLowerCase() === key);
+            games.forEach(rememberGameArt);
+            if (exact) rememberGameArt(exact);
+            saveGameArtCache();
+            renderPriorityChips();
+        } catch (e) { /* offline - the placeholder icon stays, retried next launch */ }
+        await new Promise(r => setTimeout(r, 120));
+    }
+    artLookupRunning = false;
+}
+
 function renderPriorityChips() {
     updatePriorityStatsCount();
     if (!selectedGamesChips) return;
@@ -1443,9 +1531,8 @@ function renderPriorityChips() {
         return;
     }
     selectedGamesChips.innerHTML = selectedPriorityGames.map((game, index) => {
-        const camp = allCampaigns.find(c => c.game?.displayName?.toLowerCase() === game.toLowerCase());
-        const miniImg = getGameImageUrl(camp?.game, 36, 48);
-        const imgTag = miniImg ? `<img src="${miniImg}" style="width:18px; height:24px; border-radius:3px; object-fit:cover;" onerror="this.onerror=null; this.src='https://static-cdn.jtvnw.net/ttv-boxart/488190-36x48.jpg'">` : '<div style="display:flex; align-items:center; opacity:0.7;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/></svg></div>';
+        const miniImg = getGameImageUrl(gameArtFor(game), 36, 48);
+        const imgTag = miniImg ? `<img src="${miniImg}" loading="lazy" style="width:18px; height:24px; border-radius:3px; object-fit:cover;" onerror="this.style.display='none'">` : '<div style="display:flex; align-items:center; opacity:0.7;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/></svg></div>';
         return `
         <div style="background: rgba(145,70,255,0.14); border: 1px solid var(--accent-color); color: white; padding: 5px 12px; border-radius: 20px; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px;">
             <div style="display:flex; flex-direction: row; gap: 4px; line-height: 1;">
@@ -1457,6 +1544,9 @@ function renderPriorityChips() {
             <span style="cursor: pointer; display:flex; align-items:center; color: var(--danger); margin-left: 2px;" onclick="removePriorityGame('${encodeGameParam(game)}')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
         </div>`;
     }).join('');
+    // Kick off lookups for anything still missing an icon (this re-renders the
+    // chips as each icon arrives).
+    resolvePriorityArt();
 }
 
 window.movePriorityGame = (index, direction) => {
@@ -1478,8 +1568,39 @@ window.removePriorityGame = (encodedGame) => {
     showToast(`Removed ${game} from priority`, 'info');
 };
 
-function renderPriorityGrid(searchTerm = '') {
+// Games that match the typed name in Twitch's directory, with or without drops.
+let remoteGameResults = [];
+let remoteGameTerm = '';
+let gameSearchTimer = null;
+let gameSearchSeq = 0;
+
+function scheduleGameSearch(term) {
+    const q = String(term || '').trim();
+    clearTimeout(gameSearchTimer);
+    if (q.length < 2) {
+        gameSearchSeq++;
+        remoteGameResults = [];
+        remoteGameTerm = '';
+        return;
+    }
+    gameSearchTimer = setTimeout(async () => {
+        const seq = ++gameSearchSeq;
+        remoteGameTerm = q;
+        renderPriorityGrid(q); // shows "Searching Twitch…" if there is nothing else
+        let res = null;
+        try { res = await window.electronAPI.searchGames(q); } catch (e) { res = null; }
+        if (seq !== gameSearchSeq) return; // a newer keystroke won
+        remoteGameResults = (res && res.games) || [];
+        remoteGameResults.forEach(rememberGameArt);
+        saveGameArtCache();
+        renderPriorityGrid(q);
+    }, 260);
+}
+
+function renderPriorityGrid(searchTerm = null) {
     if (!priorityGameGrid) return;
+    if (searchTerm === null) searchTerm = autoFarmSearch ? autoFarmSearch.value : '';
+    const term = String(searchTerm || '').trim();
 
     const uniqueGames = [];
     const seen = new Set();
@@ -1489,24 +1610,42 @@ function renderPriorityGrid(searchTerm = '') {
             uniqueGames.push(c.game);
         }
     }
+    uniqueGames.forEach(rememberGameArt);
+    saveGameArtCache();
 
-    if (uniqueGames.length === 0) {
-        priorityGameGrid.innerHTML = '<p style="color: var(--text-secondary); font-size: 13px; grid-column: 1/-1;">No active campaigns loaded yet.</p>';
-        return;
-    }
-
-    const filtered = searchTerm
-        ? uniqueGames.filter(g => g.displayName.toLowerCase().includes(searchTerm.toLowerCase()))
+    const campaignMatches = term
+        ? uniqueGames.filter(g => g.displayName.toLowerCase().includes(term.toLowerCase()))
         : uniqueGames;
 
-    if (filtered.length === 0) {
-        priorityGameGrid.innerHTML = '<p style="color: var(--text-secondary); font-size: 13px; grid-column: 1/-1;">No campaigns match your search.</p>';
+    // Only use results belonging to the current term - a slower answer for an
+    // older query must never overwrite the grid.
+    const searchSettled = remoteGameTerm.toLowerCase() === term.toLowerCase();
+    const extras = term && searchSettled ? remoteGameResults : [];
+
+    const merged = [];
+    const seenNames = new Set();
+    [...campaignMatches, ...extras].forEach((game) => {
+        const key = game.displayName.toLowerCase();
+        if (seenNames.has(key)) return;
+        seenNames.add(key);
+        merged.push(game);
+    });
+
+    if (merged.length === 0) {
+        let msg;
+        if (!term) msg = 'No active campaigns loaded yet — search for any game by name above.';
+        else if (searchSettled) msg = 'No games match your search.';
+        else msg = 'Searching Twitch…';
+        priorityGameGrid.innerHTML = `<p style="color: var(--text-secondary); font-size: 13px; grid-column: 1/-1;">${msg}</p>`;
         return;
     }
 
-    priorityGameGrid.innerHTML = filtered.map(game => {
+    const campaignNames = new Set(uniqueGames.map(g => g.displayName.toLowerCase()));
+
+    priorityGameGrid.innerHTML = merged.map(game => {
         const isSelected = selectedPriorityGames.some(g => g.toLowerCase() === game.displayName.toLowerCase());
         const imgUrl = getGameImageUrl(game, 144, 192);
+        const hasDrops = campaignNames.has(game.displayName.toLowerCase());
 
         return `
         <div onclick="togglePriorityGame('${encodeGameParam(game.displayName)}')" style="
@@ -1521,10 +1660,11 @@ function renderPriorityGrid(searchTerm = '') {
             overflow: hidden;
             transition: all 0.2s ease;
         ">
-            <img src="${imgUrl}" style="width:100%; aspect-ratio: 144 / 192; object-fit: cover; display:block; flex-shrink: 0;" onerror="this.onerror=null; this.src='https://static-cdn.jtvnw.net/ttv-boxart/488190-144x192.jpg'" />
+            <img src="${imgUrl}" loading="lazy" style="width:100%; aspect-ratio: 144 / 192; object-fit: cover; display:block; flex-shrink: 0;" onerror="this.onerror=null; this.style.opacity='0.15'" />
            <div style="padding: 6px 8px; flex-shrink: 0; background: ${isSelected ? 'rgba(145, 70, 255, 0.1)' : 'var(--bg-tertiary)'};">
                <p style="font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0;">${escapeHtml(game.displayName)}</p>
            </div>
+           ${!hasDrops ? '<div style="position: absolute; top: 4px; left: 4px; background: rgba(0,0,0,0.72); color: #cbd5e1; font-size: 9px; padding: 2px 5px; border-radius: 4px; letter-spacing: 0.02em;">no drops</div>' : ''}
            ${isSelected ? '<div style="position: absolute; top: 4px; right: 4px; background: var(--accent-color); color: white; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg></div>' : ''}
        </div>
        `;
@@ -1549,6 +1689,7 @@ window.togglePriorityGame = (encodedGame) => {
 if (autoFarmSearch) {
     autoFarmSearch.addEventListener('input', (e) => {
         renderPriorityGrid(e.target.value);
+        scheduleGameSearch(e.target.value);
     });
     autoFarmSearch.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {

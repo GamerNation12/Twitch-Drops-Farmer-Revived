@@ -1,4 +1,4 @@
-# Twitch Drops Farmer Revived — v1.3.3
+# Twitch Drops Farmer Revived — v1.3.4
 
 A community-fixed, still-working build of **[lokalizator-repo/TwitchDropsFarmer](https://github.com/lokalizator-repo/TwitchDropsFarmer)** `v1.3.0`.
 
@@ -8,9 +8,9 @@ original features (auto-farming, campaign browser, inventory, priority queue, Di
 RPC, tray auto-start) are untouched.
 
 > If you are only here to *use* it, you don't need this repo — grab either build from the
-> Releases page: **`TwitchDropsFarmer_Setup_v1.3.3.exe`** (a normal installer: Start Menu
+> Releases page: **`TwitchDropsFarmer_Setup_v1.3.4.exe`** (a normal installer: Start Menu
 > and desktop shortcuts, keeps farming after a reboot, updates itself in place) or the
-> portable **`TwitchDropsFarmer_v1.3.3.exe`** (one file, nothing to install). Or build it
+> portable **`TwitchDropsFarmer_v1.3.4.exe`** (one file, nothing to install). Or build it
 > yourself (`npm install && npm run dist`).
 
 ---
@@ -26,13 +26,14 @@ RPC, tray auto-start) are untouched.
 | 5 | **"No campaigns found." / inventory icons missing.** A device-code login stored the *TV* client id as the GQL `Client-Id`; Twitch answers web queries sent with it using `dropCampaigns: null` **and no error**, so the app never refreshed its security token and showed nothing. | The GQL client id is pinned to the web client id (an already-stored TV id is migrated), a null/absent `dropCampaigns` now triggers a background security-token refresh, and the inventory asks for `gameEventDrops.imageURL` so every claimed drop shows its real artwork. |
 | 6 | **The update check pointed at the dead upstream repo.** | It now checks this repo's GitHub Releases (main process, so it can send a `User-Agent`), at startup and every 6 hours, and links straight to the new download. |
 | 7 | **No minimize button, and the app vanished to the tray when you clicked its taskbar icon.** The native title-bar overlay was covered by the app's own header, minimising was intercepted into a tray hide, and relaunching started a second miner. | The header carries its own minimize / **Background** / maximize / close buttons, a plain minimize stays in the taskbar, the labelled purple **Background** button sends the app to the tray (farming keeps running), and a single-instance lock means clicking the app icon again just brings the running window back. |
-| 8 | **The header said "Drops Farmer" with a hardcoded `v1.3` badge**, so it never matched the build you were actually running. | It reads **Drops Farmer Revived** and the badge is filled in from the app's own version (`v1.3.3`), which also means the tray tooltip and window title carry the real name. |
+| 8 | **The header said "Drops Farmer" with a hardcoded `v1.3` badge**, so it never matched the build you were actually running. | It reads **Drops Farmer Revived** and the badge is filled in from the app's own version (`v1.3.4`), which also means the tray tooltip and window title carry the real name. |
 | 9 | **You could not see what changed in an update** — an update was a one-line link in Settings. | A changelog popup shows the release notes in the app, with *Later*, *Update now* and a *Skip this one* checkbox; when you are already up to date, *What's new?* in Settings shows the notes of the version you are running. |
 | 10 | **Closing the app did not close it.** The `✕` button hid the window to the tray, so the X looked broken and the app kept running invisibly. | `✕` (and Alt+F4) really quit the app now. Hiding to the tray while farming continues is the job of the labelled purple **Background** button. |
 | 11 | **Auto-farming was locked behind "launch with Windows"**, so a fresh install did nothing until you found the setting, and it defaulted to off. | **Start Farming When The App Opens** is its own switch (default **on**, saved from the old build automatically), right under *Launch on Startup*. Priority mode farms your list in order; if the list is empty it says so and falls back to Global instead of idling. |
 | 12 | **Updates meant a browser trip and a manual download.** | The app asks first, then updates itself: *Update now* downloads the new build (with a progress bar) and verifies it against the SHA-256 GitHub publishes for that release. The portable build swaps its own exe (staged and re-checked before the old one is replaced); the installed build runs the new Setup silently and reopens itself. Either way it restarts on the new version. If the build cannot replace itself, the button falls back to opening the release page. |
 | 13 | **The Inventory tab was a flat list of rows**, with broken/missing artwork, no sorting and no sign of what was still in progress. | Inventory now shows a summary strip (rewards, game groups, campaigns in progress, newest drop), an **In Progress** section with per-drop progress bars, game groups you can collapse, sorting (recent / A–Z / most drops / reward name) and lazy-loaded artwork. |
 | 14 | **The app got heavier the longer you farmed** — the console list grew forever, and the full 90-card campaign grid was rebuilt every 30 seconds even when another tab was open. | The console keeps the newest 500 lines, the campaign grid and priority list are only rebuilt while their view is visible, campaign refresh went from 30s to 45s, inventory/priority artwork loads lazily, and the main window no longer lets Chromium throttle the farm loop to one tick a minute while it sits in the tray. |
+| 15 | **The priority list could only see games that currently had a drop**, so searching for anything else found nothing and games without a campaign showed a blank placeholder icon. | The search box now queries Twitch's whole game directory (works without a login), so any game can be found and added; results and priority chips show the real box art, cached locally so the icons are there instantly next launch. Games with no active drops are labelled **no drops** instead of being hidden. |
 
 Details and the exact code changes are in [`docs/FIXES.md`](docs/FIXES.md).
 
