@@ -23,8 +23,8 @@ npm run dist
 
 Two artifacts land in `dist\`:
 
-* `dist\TwitchDropsFarmer_v1.3.4.exe` — the **portable** build (one file, no installer);
-* `dist\TwitchDropsFarmer_Setup_v1.3.4.exe` — the **installer** (NSIS, per-user, Start
+* `dist\TwitchDropsFarmer_v1.3.5.exe` — the **portable** build (one file, no installer);
+* `dist\TwitchDropsFarmer_Setup_v1.3.5.exe` — the **installer** (NSIS, per-user, Start
   Menu + desktop shortcut).
 
 The first build downloads the electron-builder tooling (and, for the installer, the NSIS
@@ -44,7 +44,7 @@ binaries), so give it a few minutes.
 Smoke-test before publishing:
 
 1. Run the portable exe — the app window opens. (No black screen: that is fix #1.)
-2. Install the Setup exe (or `TwitchDropsFarmer_Setup_v1.3.4.exe /S` for a silent
+2. Install the Setup exe (or `TwitchDropsFarmer_Setup_v1.3.5.exe /S` for a silent
    per-user install) and run it from the Start Menu.
 3. If the app does not show your account, run it once with `--twitch-login` and sign
    in (or use the **Login** button in the header: the activation code is copied to
@@ -60,18 +60,18 @@ Smoke-test before publishing:
 GitHub rejects files over 100 MB inside the repository, but a **release asset** may
 be up to 2 GB — so the exes go into a Release, not into git.
 
-Web UI: **Releases → Draft a new release**, tag `v1.3.4`, paste the notes from
-`docs\RELEASE-NOTES-v1.3.4.md`, then drag in **both** `dist\TwitchDropsFarmer_v1.3.4.exe`
-and `dist\TwitchDropsFarmer_Setup_v1.3.4.exe`.
+Web UI: **Releases → Draft a new release**, tag `v1.3.5`, paste the notes from
+`docs\RELEASE-NOTES-v1.3.5.md`, then drag in **both** `dist\TwitchDropsFarmer_v1.3.5.exe`
+and `dist\TwitchDropsFarmer_Setup_v1.3.5.exe`.
 
 Or from the command line (GitHub CLI):
 
 ```powershell
-gh release create v1.3.4 `
-  "dist\TwitchDropsFarmer_v1.3.4.exe" `
-  "dist\TwitchDropsFarmer_Setup_v1.3.4.exe" `
-  --title "v1.3.4 - search any game, real box art, verified updates" `
-  --notes-file docs\RELEASE-NOTES-v1.3.4.md
+gh release create v1.3.5 `
+  "dist\TwitchDropsFarmer_v1.3.5.exe" `
+  "dist\TwitchDropsFarmer_Setup_v1.3.5.exe" `
+  --title "v1.3.5 - search any game, real box art, updater without PowerShell" `
+  --notes-file docs\RELEASE-NOTES-v1.3.5.md
 ```
 
 > **The in-app updater depends on this step.** It calls `releases/latest` and picks the

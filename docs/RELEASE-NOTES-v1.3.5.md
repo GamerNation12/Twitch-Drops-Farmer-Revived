@@ -1,7 +1,7 @@
-# v1.3.4 — search any game, real box art in the priority list
+# v1.3.5 — search any game, real box art, and an updater without PowerShell
 
-Sits on top of `v1.3.3`. The priority list no longer depends on what happens to have a
-drop campaign right now.
+Sits on top of `v1.3.4`. The priority list no longer depends on what happens to have a
+drop campaign right now, and updating no longer starts a hidden `powershell.exe`.
 
 ## New in this build
 
@@ -18,6 +18,24 @@ drop campaign right now.
   marked with a small `no drops` tag, so you can still queue the game (it will be picked
   up as soon as a campaign appears) without wondering why nothing is being farmed.
 - **Artwork is lazy-loaded** in the results grid, matching the rest of the app.
+
+## No PowerShell in the updater
+
+The old updater wrote a `.ps1` file to `%TEMP%` and started `powershell.exe` with
+`-ExecutionPolicy Bypass` to wait for the app to close and swap the file. It was hidden, but
+it was still a PowerShell process using exactly the flags malware uses — bad for trust and
+for antivirus heuristics. It is gone, with no replacement shell of any kind:
+
+- **Portable build:** the app stages the verified new exe next to itself, renames the old
+  file aside (Windows allows renaming a file that is in use, just not deleting it), swaps
+  the new one in, starts it and quits. The leftover `.old` file is removed on the next
+  launch.
+- **Installed build:** the app re-checks the Setup's SHA-256, starts the Setup itself with
+  `/S --force-run`, and quits. The installer closes the running app, replaces the files,
+  and `--force-run` makes the silent install reopen the new build. There is no helper
+  process at all — just the app and the Setup, so nothing appears as `powershell.exe`.
+
+No PowerShell, `cmd`, `.bat`, `.vbs` or scheduled task is used at any point.
 
 ## Fixed
 
@@ -36,19 +54,26 @@ subscription to your drop events, with the 45s campaign/inventory polling as a f
 
 Two builds, same app — take whichever you prefer:
 
-- **`TwitchDropsFarmer_Setup_v1.3.4.exe`** — the installer. Installs just for your user
+- **`TwitchDropsFarmer_Setup_v1.3.5.exe`** — the installer. Installs just for your user
   (no admin prompt), adds Start Menu and desktop shortcuts, and updates itself from
   inside. Uninstalling keeps your Twitch login.
-- **`TwitchDropsFarmer_v1.3.4.exe`** — portable: one file, nothing to install. Run it
+- **`TwitchDropsFarmer_v1.3.5.exe`** — portable: one file, nothing to install. Run it
   from anywhere (a USB stick works) and it updates itself in place.
 
 (If Windows SmartScreen warns about an unknown publisher, choose
 *More info → Run anyway*; these exes are unsigned, like the original.)
 
+## Coming from v1.3.2 or older?
+
+Those builds only had a link to GitHub, so **their Download button always opens the
+release page in your browser** — that is expected and cannot be changed after the fact.
+Install v1.3.5 once by hand (either file above). From v1.3.5 onward the button downloads,
+installs and restarts the app by itself, with no browser trip.
+
 ## How to use it
 
-1. Run `TwitchDropsFarmer_Setup_v1.3.4.exe` (installer) or
-   `TwitchDropsFarmer_v1.3.4.exe` (portable).
+1. Run `TwitchDropsFarmer_Setup_v1.3.5.exe` (installer) or
+   `TwitchDropsFarmer_v1.3.5.exe` (portable).
 2. If the header does not show your account, press **Login** — the activation code is
    already on your clipboard, paste it at <https://www.twitch.tv/activate>.
 3. In **Settings → Priority Auto-Farm Games**, type a game name. Results appear below

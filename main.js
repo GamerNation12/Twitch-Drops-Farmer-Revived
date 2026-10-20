@@ -372,8 +372,49 @@ if (!gotSingleInstanceLock) {
   });
 }
 
+// A portable self-update renames the running exe to <name>.old and puts the new
+// build in its place. The old launcher keeps that file open until it exits, so it
+// can only be deleted on the next start.
+function cleanupOldPortableExe() {
+  const portable = process.env.PORTABLE_EXECUTABLE_FILE;
+  if (!portable) return;
+  const backup = portable + '.old';
+  let tries = 0;
+  const timer = setInterval(() => {
+    tries++;
+    try {
+      fs.unlinkSync(backup);
+      clearInterval(timer);
+    } catch (e) {
+      if (e.code === 'ENOENT' || tries > 20) clearInterval(timer);
+    }
+  }, 500);
+  if (timer.unref) timer.unref();
+}
+
+// A silent installed update leaves the downloaded Setup in
+// %TEMP% - the installer is using the file while it runs, so it cannot delete
+// itself. Clear anything old that a previous update left behind.
+function cleanupTempUpdateFiles() {
+  const temp = app.getPath('temp');
+  const now = Date.now();
+  let names = [];
+  try { names = fs.readdirSync(temp); } catch (e) { return; }
+  for (const name of names) {
+    if (!/^DropsFarmerRevived_.*\.exe$/i.test(name) && !/^dfr-updater-.*\.js$/i.test(name)) continue;
+    const full = path.join(temp, name);
+    try {
+      const st = fs.statSync(full);
+      if (now - st.mtimeMs < 10 * 60 * 1000) continue; // may still be in use
+      fs.unlinkSync(full);
+    } catch (e) {}
+  }
+}
+
 app.whenReady().then(() => {
   if (!gotSingleInstanceLock) return;
+  cleanupOldPortableExe();
+  cleanupTempUpdateFiles();
   createWindow()
   createTray()
   app.on('activate', () => {
@@ -626,145 +667,159 @@ ipcMain.handle('install-update', async (event, opts = {}) => {
   if (mode === 'none') return { ok: false, error: 'This build cannot update itself - use the release page.' };
   if (!file || !fs.existsSync(file)) return { ok: false, error: 'The update file is missing, download it again.' };
 
-  const pid = process.pid;
   const logFile = path.join(app.getPath('temp'), 'dfr-update.log');
-  const script = path.join(app.getPath('temp'), `dfr-update-${Date.now()}.ps1`);
   // hex sha256 of the new exe, if GitHub gave us one for this release
-  const expectedSha = String(opts.digest || '').replace(/^sha256:/i, '').trim().toLowerCase();
+  const expected = String(opts.digest || '').replace(/^sha256:/i, '').trim().toLowerCase();
 
-  // PowerShell, not cmd: we need an exact "is this PID still alive" check and a
-  // real retry loop. The portable launcher keeps its own exe open for a moment
-  // after the app exits (and antivirus can hold it), so a single copy is flaky.
-  const q = (p) => `'${String(p).replace(/'/g, "''")}'`;
-  const prologue = [
-    "$ErrorActionPreference = 'SilentlyContinue'",
-    `$log = ${q(logFile)}`,
-    `$expected = ${q(expectedSha)}`,
-    "function Log($m) { Add-Content -LiteralPath $log -Value ('[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m) }",
-    `Log ('updating ' + ${q(path.basename(target))} + ' with ' + ${q(path.basename(file))})`,
-    '',
-    '# 1. wait for this app to be gone (up to 2 minutes)',
-    'for ($i = 0; $i -lt 240; $i++) {',
-    `  if (-not (Get-Process -Id ${pid} -ErrorAction SilentlyContinue)) { break }`,
-    '  Start-Sleep -Milliseconds 500',
-    '}',
-    "Log ('app exited after ' + $i + ' checks')"
-  ];
+  const logLine = (line) => {
+    try { fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${line}\n`); } catch (e) {}
+  };
+  const sha256File = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  // Portable build: stage the new exe and swap it in over the file the user runs.
-  const swapBody = [
-    '',
-    '# 2. stage the new exe next to the target (and never touch the working',
-    '#    exe until the staged file is known-good)',
-    `$new = ${q(target)} + '.new'`,
-    'Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue',
-    '$ok = $false',
-    'for ($i = 0; $i -lt 60; $i++) {',
-    '  try {',
-    `    Copy-Item -LiteralPath ${q(file)} -Destination $new -Force -ErrorAction Stop`,
-    '    $ok = $true',
-    '    break',
-    '  } catch {',
-    '    Start-Sleep -Milliseconds 1000',
-    '  }',
-    '}',
-    'if ($ok -and $expected -ne "") {',
-    '  $h = (Get-FileHash -LiteralPath $new -Algorithm SHA256).Hash.ToLower()',
-    '  if ($h -eq $expected) {',
-    "    Log 'COPY_VERIFIED'",
-    '  } else {',
-    "    Log ('COPY_VERIFY_FAILED expected=' + $expected + ' got=' + $h)",
-    '    $ok = $false',
-    '  }',
-    '}',
-    '',
-    '# 3. swap it in, retrying while the launcher still holds the old exe',
-    'if ($ok) {',
-    '  $moved = $false',
-    '  for ($i = 0; $i -lt 60; $i++) {',
-    '    try {',
-    `      Move-Item -LiteralPath $new -Destination ${q(target)} -Force -ErrorAction Stop`,
-    '      $moved = $true',
-    '      break',
-    '    } catch {',
-    '      Start-Sleep -Milliseconds 1000',
-    '    }',
-    '  }',
-    '  if ($moved) {',
-    "    Log 'COPY_OK'",
-    `    Remove-Item -LiteralPath ${q(file)} -Force -ErrorAction SilentlyContinue`,
-    '  } else {',
-    "    Log 'COPY_FAILED - relaunching the current version'",
-    '    Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue',
-    '  }',
-    '} else {',
-    "  Log 'COPY_FAILED - relaunching the current version'",
-    '  Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue',
-    '}',
-    'Start-Sleep -Milliseconds 800',
-    `Start-Process -FilePath ${q(target)}`,
-    "Log 'relaunched'"
-  ];
-
-  // Installed build: the Setup is the update. Check it, run it silently, relaunch.
-  const installBody = [
-    '',
-    '# 2. check the installer before running it',
-    '$ok = $true',
-    'if ($expected -ne "") {',
-    `  $h = (Get-FileHash -LiteralPath ${q(file)} -Algorithm SHA256).Hash.ToLower()`,
-    '  if ($h -eq $expected) {',
-    "    Log 'INSTALLER_VERIFIED'",
-    '  } else {',
-    "    Log ('INSTALLER_VERIFY_FAILED expected=' + $expected + ' got=' + $h)",
-    '    $ok = $false',
-    '  }',
-    '}',
-    '',
-    '# 3. run the Setup silently (/S = no UI, no prompts) and relaunch',
-    'if ($ok) {',
-    `  $p = Start-Process -FilePath ${q(file)} -ArgumentList '/S' -Wait -PassThru`,
-    "  Log ('installer exit code ' + $p.ExitCode)",
-    '  Start-Sleep -Milliseconds 1500',
-    `  Start-Process -FilePath ${q(target)}`,
-    "  Log 'relaunched'",
-    `  Remove-Item -LiteralPath ${q(file)} -Force -ErrorAction SilentlyContinue`,
-    '} else {',
-    "  Log 'INSTALL_FAILED - relaunching the current version'",
-    `  Start-Process -FilePath ${q(target)}`,
-    '}'
-  ];
-
-  const lines = [
-    ...prologue,
-    ...(mode === 'installed' ? installBody : swapBody),
-    'Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue'
-  ];
-
+  // Check the payload again right before it is used: the download was verified,
+  // but this is the file that replaces something that works.
+  let payloadHash = '';
   try {
-    // UTF-8 with BOM: Windows PowerShell 5.1 reads BOM-less scripts as ANSI,
-    // which would mangle non-ASCII user paths.
-    fs.writeFileSync(script, '\ufeff' + lines.join('\r\n'), 'utf8');
+    payloadHash = sha256File(file);
+  } catch (e) {
+    return { ok: false, error: 'The update file could not be read. Download it again.' };
+  }
+  if (expected && payloadHash !== expected) {
+    logLine(`UPDATE_VERIFY_FAILED expected=${expected} got=${payloadHash}`);
+    try { fs.unlinkSync(file); } catch (e) {}
+    return { ok: false, error: 'The update file failed its checksum. Download it again.' };
+  }
 
-    // NOTE: spawn('powershell.exe', [...], { detached: true, stdio: 'ignore' })
-    // silently does nothing on Windows (verified: the script never runs, the
-    // child "exits 0"). Going through cmd/shell does run it, and the quoted
-    // path survives spaces in %TEMP%.
-    const child = spawn(
-      `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "${script}"`,
-      [],
-      { detached: true, stdio: 'ignore', windowsHide: true, shell: true }
-    );
-    child.unref();
+  // No PowerShell, no cmd, no .bat and no console window anywhere in here.
+  //
+  // Portable build: the portable launcher is a separate process, so the file the
+  // user double-clicked can be swapped from inside the app. Windows allows
+  // renaming a file that is in use (it does not allow deleting it), which is all
+  // we need: stage the verified new exe next to it, move the old one aside, move
+  // the new one into place, start it, quit.
+  if (mode === 'portable') {
+    const staged = target + '.new';
+    const backup = target + '.old';
+
+    // 1. stage + verify next to the target (same volume, so the moves are atomic)
+    try { fs.unlinkSync(staged); } catch (e) {}
+    let stagedOk = false;
+    for (let i = 0; i < 20 && !stagedOk; i++) {
+      try {
+        fs.copyFileSync(file, staged);
+        stagedOk = true;
+      } catch (e) {
+        await sleep(250);
+      }
+    }
+    if (!stagedOk) {
+      logLine('SWAP_FAILED - could not stage the new exe');
+      return { ok: false, error: 'Windows would not let the update write the new build. Run the downloaded file instead.' };
+    }
+    let stagedHash = '';
+    try { stagedHash = sha256File(staged); } catch (e) {}
+    if (expected && stagedHash !== expected) {
+      logLine(`COPY_VERIFY_FAILED expected=${expected} got=${stagedHash}`);
+      try { fs.unlinkSync(staged); } catch (e) {}
+      return { ok: false, error: 'The update did not copy correctly. The app was not changed.' };
+    }
+    logLine(`COPY_VERIFIED ${stagedHash}`);
+
+    // 2. move the old exe aside (allowed even while the launcher is using it)
+    try { fs.unlinkSync(backup); } catch (e) {}
+    let renamed = false;
+    for (let i = 0; i < 40 && !renamed; i++) {
+      try {
+        fs.renameSync(target, backup);
+        renamed = true;
+      } catch (e) {
+        await sleep(250);
+      }
+    }
+    if (!renamed) {
+      try { fs.unlinkSync(staged); } catch (e) {}
+      logLine('SWAP_FAILED - could not move the old exe aside');
+      return { ok: false, error: 'Windows is still holding the app file. Close the app, then run the downloaded file.' };
+    }
+
+    // 3. put the verified file in place; restore the old one if this fails
+    let installed = false;
+    for (let i = 0; i < 20 && !installed; i++) {
+      try {
+        fs.renameSync(staged, target);
+        installed = true;
+      } catch (e) {
+        await sleep(250);
+      }
+    }
+    if (!installed) {
+      try { fs.renameSync(backup, target); } catch (e) {}
+      try { fs.unlinkSync(staged); } catch (e) {}
+      logLine('SWAP_FAILED - could not put the new exe in place');
+      return { ok: false, error: 'Windows would not let the update replace the app. Close the app, then run the downloaded file.' };
+    }
+
+    const landed = sha256File(target);
+    if (expected && landed !== expected) {
+      try { fs.unlinkSync(target); } catch (e) {}
+      try { fs.renameSync(backup, target); } catch (e) {}
+      logLine(`SWAP_VERIFY_FAILED expected=${expected} got=${landed}`);
+      return { ok: false, error: 'The update did not install correctly. The app was not changed.' };
+    }
+
+    logLine(`SWAP_VERIFIED ${landed}`);
+    logLine(`COPY_OK ${landed}`);
+    try { fs.unlinkSync(file); } catch (e) {}
+    // the old file is deleted on the next launch (this launcher still has it open).
+    // app.relaunch starts the new copy only after this process has exited, so the
+    // new instance cannot lose the single-instance lock to the one that is quitting.
+    app.relaunch({ execPath: target, args: process.argv.slice(1) });
+    logLine('relaunched');
 
     setTimeout(() => {
       isQuitting = true;
-      app.quit();
-    }, 400);
+      app.exit(0);
+    }, 300);
+    return { ok: true, target, mode };
+  }
+
+  // Installed build: the Setup is the update. Start it detached and quit; the
+  // installer's own NSIS script closes every process with the app's exe name,
+  // replaces the files, and (because of --force-run) starts the new build when
+  // it is done. No helper process and no shell: the only two programs involved
+  // are this app and the verified Setup.
+  //
+  // The old helper ran from the installed exe to wait for the app to exit, but
+  // that kept the exe open and made the installer fail with "Failed to uninstall
+  // old application files" (exit code 2). The installer can wait for the app by
+  // itself, so it does.
+  //
+  // /S is a silent install; --force-run makes NSIS start the app after a silent
+  // install. The env hook lets the path be tested against a temp install
+  // directory instead of the real one.
+  const installArgs = ['/S', '--force-run'];
+  if (process.env.DFR_UPDATE_ARGS) installArgs.push(process.env.DFR_UPDATE_ARGS);
+
+  try {
+    const child = spawn(file, installArgs, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true
+    });
+    child.unref();
+    logLine(`INSTALLER_STARTED pid=${child.pid} args=${installArgs.join(' ')}`);
+
+    // Give the installer a moment to create its process before this one exits.
+    setTimeout(() => {
+      isQuitting = true;
+      app.exit(0);
+    }, 500);
 
     return { ok: true, target, mode };
   } catch (e) {
-    return { ok: false, error: (e && e.message) || 'Could not start the updater.' };
+    logLine('INSTALLER_FAILED ' + ((e && e.message) || 'spawn failed'));
+    return { ok: false, error: 'Could not start the installer. Run the downloaded file instead.' };
   }
 });
 

@@ -1,4 +1,4 @@
-# What was changed (v1.3.0 → v1.3.3)
+# What was changed (v1.3.0 → v1.3.5)
 
 Every change below is relative to upstream
 `lokalizator-repo/TwitchDropsFarmer@v1.3.0`. Files touched: `main.js`,
@@ -363,31 +363,40 @@ it defaulted to `false`.
   `[Startup] Your priority list is empty — auto-starting in GLOBAL mode.` and farms
   globally instead of idling.
 
-## 12. In-app updater for the portable build (`main.js`, `preload.js`, `index.html`, `style.css`, `renderer.js`)
+## 12. In-app updater for portable and installed builds (`main.js`, `preload.js`, `index.html`, `style.css`, `renderer.js`)
 
 `electron-updater` does not support the `portable` target, and `process.execPath` points
 at the temp folder a portable exe unpacks itself into — not at the file the user
 double-clicked. electron-builder exposes the real path in `PORTABLE_EXECUTABLE_FILE`, so:
 
-* `update-capability` reports `canSelfUpdate` (true only when that env var exists);
+* `update-capability` reports `canSelfUpdate` and the mode it will use (`portable`,
+  `installed`, or `none` for a source checkout);
 * `check-for-updates` also returns the asset's `digest` (`sha256:<hex>`), which GitHub
   publishes for release assets;
 * `download-update` streams the release asset with `fetch` +
-  `Readable.fromWeb(...).pipe(fs.createWriteStream(...))` into `%TEMP%`, emitting
-  `update-progress` events (~5/s) that drive the popup's progress bar. It hashes the bytes
-  while streaming **and hashes the finished file again off disk**, throwing the file away
-  unless both match the release `digest`. It also rejects a size that disagrees with
-  `content-length`, anything under 10 MB (an error page), and anything that does not start
-  with `MZ`. Every check is logged to `%TEMP%\dfr-download.log`;
-* `install-update` writes a small **PowerShell** helper (started `detached`; `cmd` cannot do
-  a reliable PID check) that: waits for this PID to disappear (240 × 500 ms), copies the new
-  exe to a `.new` file **next to** the target with up to 60 retries (the portable launcher
-  keeps its own exe open for a moment after the app exits, and antivirus can hold it),
-  verifies that staged file's SHA-256 against the release digest, and only then moves it over
-  `PORTABLE_EXECUTABLE_FILE`, relaunches, deletes the temp payload and logs every step to
-  `%TEMP%\dfr-update.log` (`COPY_VERIFIED` / `COPY_OK` / `COPY_FAILED`). If the staged file
-  fails verification the working exe is left untouched;
-* the app then quits itself (~400 ms later) so the swap can happen;
+  `stream/promises.pipeline(Readable.fromWeb(...), counter, fs.createWriteStream(...))`
+  into `%TEMP%`, emitting `update-progress` events (~5/s) that drive the popup's progress
+  bar. `pipeline` only resolves once the file is closed, and the **finished file is hashed
+  from disk** and compared with the release `digest`. It also rejects a size that disagrees
+  with `content-length`, anything under 10 MB (an error page), and anything that does not
+  start with `MZ`. Every check is logged to `%TEMP%\dfr-download.log`;
+* `install-update` re-hashes the payload right before using it and then, **with no
+  PowerShell, cmd or .bat**:
+  * *portable*: stages the verified exe as `<target>.new` (same folder, so the moves are
+    atomic), renames the running file to `<target>.old` (allowed while it is in use),
+    renames the staged file into place, verifies the landed file's SHA-256, starts it, and
+    quits. If anything fails the old name is restored and the working exe is untouched. The
+    `.old` file is deleted on the next launch;
+  * *installed*: starts the verified Setup itself, detached, with `/S --force-run`, then
+    exits. The installer's NSIS script closes every process with the app's exe name, so
+    it can replace the files; `--force-run` is what makes a *silent* install start the new
+    build afterwards. There is no helper process and no shell at all — just the app and
+    the Setup. (An earlier helper ran from the installed exe while waiting for the app to
+    exit; that kept the exe open and made the uninstall step fail with code 2.) Leftover
+    payloads from a previous update are deleted on the next launch.
+
+  Both paths log every step to `%TEMP%\dfr-update.log` (`COPY_VERIFIED` / `COPY_OK` /
+  `SWAP_VERIFIED` / `relaunched` for portable, `INSTALLER_STARTED` for installed);
 * if `canSelfUpdate` is false the popup button degrades to *Download vX.Y.Z*, which opens
   the release asset in the browser exactly as before.
 
@@ -449,8 +458,9 @@ The updater now has two modes (`updateMode()` in `main.js`):
 * **portable** — `PORTABLE_EXECUTABLE_FILE` is set: download the new portable exe, wait
   for the app to exit, swap the file (details below);
 * **installed** — `app.isPackaged` and no such env var: `process.execPath` *is* the real
-  installed exe, so the update is the new **Setup**, run with `/S` (silent, no UI, no
-  prompts) after the app has exited, and the app is started again afterwards;
+  installed exe, so the update is the new **Setup**. The app re-checks the Setup's hash,
+  starts it detached with `/S --force-run`, and quits; the installer closes the app,
+  replaces the files, and starts the new build itself;
 * **none** — running from source: `canSelfUpdate` is false and the popup button falls back
   to the release page, exactly as before.
 
@@ -459,8 +469,10 @@ fits the running build (`*_Setup_*.exe` for installed builds, `TwitchDropsFarmer
 otherwise) instead of "the first .exe in the release".
 
 The updater script logs to `%TEMP%\dfr-update.log`:
-`INSTALLER_VERIFIED` / `installer exit code 0` / `relaunched` for installed builds,
-`COPY_VERIFIED` / `COPY_OK` for portable ones.
+`INSTALLER_STARTED pid=… args=/S --force-run` for installed builds,
+`COPY_VERIFIED` / `SWAP_VERIFIED` / `relaunched` for portable ones. The installed build
+cannot log the installer's exit code: the NSIS installer closes every process with the
+app's exe name before it replaces the files, and the app is one of them.
 
 ### Never install a bad file
 
@@ -611,3 +623,23 @@ In the renderer:
   portable asset matched three times out of three.
 * `verify-build.mjs` on 1.3.4: all checks pass, including the new `search-games` handler,
   the icon cache and the `pipeline` downloader.
+* **v1.3.5, clean rebuild:** the earlier `0xC0000005` was a bad build artifact, not the
+  installer. A clean `npm run dist` produced a Setup that installed silently
+  (`/S /D=<temp dir>`, exit code 0) and reported version 1.3.5.
+* **v1.3.5, installed update (the path that used to fail):** installed 1.3.5 to a temp
+  directory, let it download the live v1.3.4 Setup (digest matched), and pressed update.
+  `%TEMP%\dfr-update.log` showed `INSTALLER_STARTED pid=… args=/S --force-run`; the
+  installer replaced the temp install with 1.3.4 in 9 seconds, `--force-run` reopened it,
+  CDP answered again on the same port, and no "Failed to uninstall old application files"
+  dialog appeared. The old Node helper was removed because it held the installed exe open
+  and caused uninstaller exit code 2.
+* **v1.3.5, portable update:** the live v1.3.4 portable was swapped into a 1.3.5 copy with
+  `COPY_VERIFIED → SWAP_VERIFIED → COPY_OK → relaunched`; the target hashed exactly as the
+  release digest, the app came back on the same debug port reporting 1.3.4, and the
+  renamed `.old` backup was deleted on the next launch.
+* **v1.3.5, updater contents:** `verify-build.mjs` passes 46 checks on the packaged asar,
+  including the direct Setup spawn (`/S --force-run`, no helper) and a scan that finds no
+  PowerShell, `-NoProfile`, `-ExecutionPolicy`, `.ps1` or `Add-Content` in the update path.
+  `dist\TwitchDropsFarmer_v1.3.5.exe` (73,570,401 bytes,
+  `31660405…`) and `dist\TwitchDropsFarmer_Setup_v1.3.5.exe` (73,842,837 bytes,
+  `cb65975b…`) are both present and over 50 MB.
