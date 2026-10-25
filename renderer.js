@@ -705,6 +705,30 @@ let activeFarmingChannelLogin = null;
 let masterAutoFarmEnabled = false;
 let tokenProcessingStarted = false;
 
+async function openStreamerSelector() {
+    const campaign = allCampaigns.find(c => c.id === activeFarmingCampaignId);
+    if (!campaign) {
+        addLog('No active campaign to change streamer for.', 'warn');
+        return;
+    }
+    if (currentAvailableStreamersList && currentAvailableStreamersList.length > 0) {
+        showStreamerSelector(campaign, currentAvailableStreamersList);
+        return;
+    }
+    // Re-fetch to get live streamers if cache is empty
+    addLog('Refreshing streamer list...', 'info');
+    await fetchAndUpdateCampaigns();
+    const c = allCampaigns.find(c2 => c2.id === activeFarmingCampaignId);
+    if (!c) return;
+    if (currentAvailableStreamersList && currentAvailableStreamersList.length > 0) {
+        showStreamerSelector(c, currentAvailableStreamersList);
+    } else {
+        addLog('No streamers available to choose from.', 'warn');
+    }
+}
+
+window.openStreamerSelector = openStreamerSelector;
+
 async function showStreamerSelector(campaign, streamersList) {
     const container = document.getElementById('heroMonitorCard');
     if (!container) return;
@@ -745,6 +769,9 @@ window.selectStreamerAndFarm = async (campaignId, idx) => {
     const streamerNode = currentAvailableStreamersList[idx]?.node || currentAvailableStreamersList[idx];
     if (!streamerNode) return;
     
+    // Halt any running worker before switching streamers
+    haltCurrentFarmWorker();
+
     const targetStreamer = streamerNode.broadcaster || streamerNode;
     const streamerLogin = targetStreamer.login;
     const streamerId = targetStreamer.id;
@@ -775,29 +802,12 @@ window.selectStreamerAndFarm = async (campaignId, idx) => {
     }
     
     updateHeaderFarmWidget();
+    renderIdlePlaceholder();
     setTimeout(fetchAndUpdateCampaigns, 3000);
 };
 
 window.cancelStreamerSelection = () => {
-    const heroCard = document.getElementById('heroMonitorCard');
-    if (heroCard) {
-        heroCard.innerHTML = `<div class="empty-state" style="width: 100%; text-align: center; padding: 28px 20px;">
-            <div class="icon" style="margin-bottom: 12px; filter: drop-shadow(0 0 16px rgba(145, 70, 255, 0.45)); color: var(--accent-hover); display: flex; justify-content: center;">
-              <svg width="48" height="48" viewBox="0 0 24 24" class="svg-icon icon-gamepad"><rect x="2" y="6" width="20" height="12" rx="6" fill="rgba(168, 85, 247, 0.25)" stroke="#a855f7" stroke-width="2"/><line x1="6" y1="12" x2="10" y2="12" stroke="#e0e7ff" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="10" x2="8" y2="14" stroke="#e0e7ff" stroke-width="2" stroke-linecap="round"/><circle cx="15" cy="13" r="1.2" fill="#f43f5e"/><circle cx="17.5" cy="10.5" r="1.2" fill="#38bdf8"/></svg>
-            </div>
-            <h2 style="margin-bottom: 8px; font-size: 20px; font-weight: 800; color: white;">Ready to Auto-Farm</h2>
-            <p style="color: var(--text-secondary); max-width: 440px; margin: 0 auto 20px; line-height: 1.5; font-size: 13.5px;">
-              Bot standing by. Click <b>Start Farm</b> in the sidebar or browse active campaigns to start earning Twitch drops automatically.
-            </p>
-            <div style="display: flex; gap: 12px; justify-content: center;">
-              <button class="btn-primary" onclick="document.getElementById('btnNavCampaigns').click()" style="width: auto; padding: 10px 22px; font-size: 13px;">Browse Active Campaigns</button>
-            </div>
-          </div>`;
-    }
-    const btnRunFarm = document.getElementById('btnRunFarm');
-    const btnStopFarm = document.getElementById('btnStopFarm');
-    if (btnRunFarm) btnRunFarm.style.display = 'flex';
-    if (btnStopFarm) btnStopFarm.style.display = 'none';
+    renderIdlePlaceholder();
 };
 let currentUserId = null;
 let wsDropProgress = {};
@@ -3585,25 +3595,8 @@ async function startFarmAction(campaign, isAuto = false) {
             return !login || (!isBlacklisted && !isSessionSkipped);
         });
 
-        if (availableStreams.length > 1 && !whitelistedLogins && !targetStreamerLogins) {
-            currentAvailableStreamersList = availableStreams;
-            showStreamerSelector(campaign, availableStreams);
-            if (farmStatus) farmStatus.innerText = `${availableStreams.length} streamers available - select one`;
-            if (btnRunFarm) btnRunFarm.style.display = 'flex';
-            if (btnStopFarm) btnStopFarm.style.display = 'none';
-            if (typeof campaignIdBeingStarted !== 'undefined') campaignIdBeingStarted = null;
-            return;
-        }
-
-        // If multiple streamers available and not in priority/whitelist strict mode, show selection
-        if (availableStreams.length > 1 && !whitelistedLogins && !targetStreamerLogins) {
-            currentAvailableStreamersList = availableStreams;
-            showStreamerSelector(campaign, availableStreams);
-            if (farmStatus) farmStatus.innerText = `${availableStreams.length} streamers available - select one`;
-            if (btnRunFarm) btnRunFarm.style.display = 'flex';
-            if (btnStopFarm) btnStopFarm.style.display = 'none';
-            return;
-        }
+        // Cache list for the Change Streamer button; auto-pick first instead of blocking.
+        currentAvailableStreamersList = availableStreams;
 
         let targetStreamerNode = null;
         const targetGameId = campaign.game?.id;
@@ -4464,9 +4457,10 @@ function renderIdlePlaceholder() {
                 </div>
                 <h2 style="margin-bottom: 4px; font-size: 20px; font-weight: 800; color: white;">Farming ${gameName}</h2>
                 <p style="color: var(--text-secondary); font-size: 16px; margin-bottom: 16px;">Watching <b>@${escapeHtml(activeFarmingChannelLogin)}</b></p>
-                <div class="hero-actions" style="display: flex; gap: 8px; justify-content: center; align-items: center;">
+                <div class="hero-actions" style="display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap;">
                     <button class="btn-danger" onclick="stopFarmAction()" style="width: auto; padding: 7px 16px;">Stop Farm</button>
                     <button class="btn-secondary" onclick="skipStreamerAction()" style="width: auto; padding: 7px 14px;">Skip Streamer</button>
+                    <button class="btn-secondary" onclick="openStreamerSelector()" style="width: auto; padding: 7px 14px;">Change Streamer</button>
                 </div>
             </div>
         `;
