@@ -697,14 +697,10 @@ let currentAvailableStreamersList = [];
 let selectedStreamerForFarm = null;
 let currentFarmCampaignId = null;
 let activeFarmingCampaignId = null;
-let currentAvailableStreamersList = [];
-let selectedStreamerForFarm = null;
 let previewCampaignId = null;
 let activeFarmingChannelLogin = null;
 let masterAutoFarmEnabled = false;
 let tokenProcessingStarted = false;
-let currentAvailableStreamersList = [];
-let selectedStreamerForFarm = null;
 
 async function showStreamerSelector(campaign, streamersList) {
     const container = document.getElementById('heroMonitorCard');
@@ -2298,8 +2294,6 @@ async function cycleCampaign(direction, autoStart = false) {
     }
 }
 
-let currentAvailableStreamersList = [];
-let selectedStreamerForFarm = null;
     if (isFarmingLoopBusy) return;
     if (!masterAutoFarmEnabled && !activeFarmingCampaignId) return;
 
