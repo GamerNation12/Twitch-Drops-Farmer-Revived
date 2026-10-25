@@ -19,7 +19,8 @@ const ICONS = {
     info: (size = 16) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" class="svg-icon icon-info"><circle cx="12" cy="12" r="10" fill="rgba(56, 189, 248, 0.2)" stroke="#38bdf8" stroke-width="2"/><line x1="12" y1="16" x2="12" y2="12" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/><line x1="12" y1="8" x2="12.01" y2="8" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"/></svg>`,
     spinner: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" class="svg-icon spin"><circle cx="12" cy="12" r="10" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="3"/><path d="M12 2a10 10 0 0 1 10 10" fill="none" stroke="#a855f7" stroke-width="3" stroke-linecap="round"/></svg>`,
     stop: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" class="svg-icon icon-stop"><rect x="6" y="6" width="12" height="12" rx="2" fill="#ef4444" stroke="#f87171" stroke-width="1"/></svg>`,
-    skip: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" class="svg-icon icon-skip"><polygon points="5 4 15 12 5 20 5 4" fill="rgba(168, 85, 247, 0.3)" stroke="#c084fc" stroke-width="2" stroke-linejoin="round"/><line x1="19" y1="5" x2="19" y2="19" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/></svg>`
+    skip: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" class="svg-icon icon-skip"><polygon points="5 4 15 12 5 20 5 4" fill="rgba(168, 85, 247, 0.3)" stroke="#c084fc" stroke-width="2" stroke-linejoin="round"/><line x1="19" y1="5" x2="19" y2="19" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/></svg>`,
+    refresh: (size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" class="svg-icon icon-refresh"><path d="M23 4v3h-4a2 2 0 01-2 2v3a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h3V1a2 2 0 012 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M1 20v3h4a2 2 0 002 2v3a2 2 0 002-2h3v-3a2 2 0 00-2-2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 };
 
 const getEl = (id) => document.getElementById(id);
@@ -2134,7 +2135,7 @@ function validateCampaign(c, inventory = null) {
             return { isValid: false, reason: 'Impossible to complete (Too little time left)' };
         }
     } else {
-        if (minutesLeft < 5) return { isValid: false, reason: 'Campaign ending in < 5m' };
+        if (minutesLeft < 1) return { isValid: false, reason: 'Campaign ending in < 1m' };
     }
 
     const hasSubRequirement = c.timeBasedDrops.some(d => (d.requiredSubs || 0) > 0);
@@ -2664,7 +2665,10 @@ async function fetchAndUpdateCampaigns() {
         for (const c of rawCampaigns) {
             if (!c) continue;
             const validation = validateCampaign(c, null);
-            if (!validation.isValid) continue;
+            if (!validation.isValid) {
+                addLog(`[Skip] ${c.game?.displayName || 'Unknown'}: ${validation.reason}`, 'system');
+                continue;
+            }
 
             const start = new Date(c.startAt);
             const end = new Date(c.endAt);
@@ -3180,6 +3184,18 @@ function setupCampaignsListEvents() {
                 runMasterFarmLoop();
                 fetchAndUpdateCampaigns();
             }
+        };
+    }
+
+    const btnRefreshCampaigns = document.getElementById('btnRefreshCampaigns');
+    if (btnRefreshCampaigns) {
+        btnRefreshCampaigns.onclick = async () => {
+            btnRefreshCampaigns.disabled = true;
+            btnRefreshCampaigns.innerHTML = `${ICONS.spinner(12)} Refreshing...`;
+            addLog('Manual refresh: reloading campaigns...', 'system');
+            await fetchAndUpdateCampaigns();
+            btnRefreshCampaigns.disabled = false;
+            btnRefreshCampaigns.innerHTML = `${ICONS.refresh(12)} Refresh`;
         };
     }
 }
