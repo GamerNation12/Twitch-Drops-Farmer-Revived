@@ -695,6 +695,8 @@ let discordRPCEnabled = localStorage.getItem('discordRPCEnabled') === 'true';
 let rpcFarmingStartTimestamp = null;
 let currentAvailableStreamersList = [];
 let selectedStreamerForFarm = null;
+let browsedCampaignId = null;
+let manualOverrideId = null;
 let currentFarmCampaignId = null;
 let activeFarmingCampaignId = null;
 let previewCampaignId = null;
@@ -2294,6 +2296,7 @@ async function cycleCampaign(direction, autoStart = false) {
     }
 }
 
+async function runMasterFarmLoop() {
     if (isFarmingLoopBusy) return;
     if (!masterAutoFarmEnabled && !activeFarmingCampaignId) return;
 
@@ -2346,7 +2349,22 @@ async function cycleCampaign(direction, autoStart = false) {
                                 statusArea.innerHTML = (rem > 0)
                                     ? `<span class="stall-timer-badge warning">${ICONS.clock(11)} Stall check: ${rem}s</span>`
                                     : `<span class="stall-timer-badge danger">${ICONS.warn(11)} Stall verified!</span>`;
-                            } else {
+    } else if (masterAutoFarmEnabled) {
+        if (dot) {
+            dot.className = 'status-indicator yellow';
+            dot.style.boxShadow = '0 0 8px var(--warning)';
+        }
+        if (text) text.innerText = 'Running';
+        if (subtext) subtext.innerText = '— Waiting for campaign…';
+        if (btnSkip) btnSkip.style.display = 'none';
+        if (currentFarmTitle) {
+            currentFarmTitle.innerText = 'Running';
+            currentFarmTitle.style.color = 'var(--text-warning)';
+        }
+        if (statsWorkerStatus) {
+            statsWorkerStatus.innerHTML = `<span style="color: var(--warning); font-size: 14px; font-weight:700;">Waiting for campaign…</span>`;
+        }
+    } else {
                                 statusArea.innerHTML = '';
                             }
                         } else if (uiTimerInterval) {
