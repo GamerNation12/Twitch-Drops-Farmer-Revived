@@ -3476,6 +3476,7 @@ function stopFarmAction(campaign) {
     updateMasterAutoFarmUI();
     if (targetCamp) {
         startFarmingSimulation(targetCamp);
+        renderIdlePlaceholder();
     } else {
         renderIdlePlaceholder();
     }
@@ -3692,6 +3693,7 @@ async function startFarmAction(campaign, isAuto = false) {
         progressionTracker[campaign.id] = { mins: -1, time: Date.now() };
 
         updateHeaderFarmWidget();
+        renderIdlePlaceholder();
         setTimeout(fetchAndUpdateCampaigns, 3000);
     } catch (e) {
         if (btnRunFarm) btnRunFarm.style.display = 'flex';
@@ -4447,24 +4449,65 @@ async function renderInventory() {
 }
 
 function renderIdlePlaceholder() {
-    if (activeFarmingCampaignId || browsedCampaignId) return;
-
     const heroCard = getEl('heroMonitorCard');
-    if (heroCard) {
+    if (!heroCard) return;
+
+    // If a specific campaign is being farmed, show the streamer info instead of idle.
+    if (activeFarmingCampaignId && activeFarmingChannelLogin) {
+        const curr = allCampaigns.find(c => c.id === activeFarmingCampaignId);
+        const gameName = curr?.game?.displayName || 'Twitch Game';
+        const gameImg = getGameImageUrl(curr?.game, 120, 160);
         heroCard.innerHTML = `
             <div class="empty-state fade-in" style="width: 100%; text-align: center; padding: 28px 20px;">
-                <div class="icon" style="margin-bottom: 12px; filter: drop-shadow(0 0 16px rgba(145, 70, 255, 0.45)); color: var(--accent-hover); display: flex; justify-content: center;">${ICONS.gamepad(48)}</div>
-                <h2 style="margin-bottom: 8px; font-size: 20px; font-weight: 800; color: white;">Ready to Auto-Farm</h2>
-                <p style="color: var(--text-secondary); max-width: 440px; margin: 0 auto 20px; line-height: 1.5; font-size: 13.5px;">
-                    Bot standing by. Click <b>Start Farm</b> in the sidebar or browse active campaigns to start earning Twitch drops automatically.
-                </p>
-                <div style="display: flex; gap: 12px; justify-content: center;">
-                    <button class="btn-primary" onclick="document.getElementById('btnNavCampaigns').click()" style="width: auto; padding: 10px 22px; font-size: 13px;">Browse Active Campaigns</button>
+                <div class="icon" style="margin-bottom: 12px; filter: drop-shadow(0 0 16px rgba(145, 70, 255, 0.45)); color: var(--accent-hover); display: flex; justify-content: center;">
+                    ${gameImg ? `<img src="${gameImg}" style="width: 120px; height: 160px; border-radius: 12px; object-fit: cover;" onerror="this.onerror=null; this.src='assets/icon.png'"/>` : ICONS.gamepad(48)}
+                </div>
+                <h2 style="margin-bottom: 4px; font-size: 20px; font-weight: 800; color: white;">Farming ${gameName}</h2>
+                <p style="color: var(--text-secondary); font-size: 16px; margin-bottom: 16px;">Watching <b>@${escapeHtml(activeFarmingChannelLogin)}</b></p>
+                <div class="hero-actions" style="display: flex; gap: 8px; justify-content: center; align-items: center;">
+                    <button class="btn-danger" onclick="stopFarmAction()" style="width: auto; padding: 7px 16px;">Stop Farm</button>
+                    <button class="btn-secondary" onclick="skipStreamerAction()" style="width: auto; padding: 7px 14px;">Skip Streamer</button>
                 </div>
             </div>
         `;
+        const dropsContainer = getEl('currentFarmDropsContainer');
+        if (dropsContainer) dropsContainer.style.display = 'block';
+        return;
     }
 
+    // Master farm is running but waiting for a campaign to pick up.
+    if (masterAutoFarmEnabled) {
+        heroCard.innerHTML = `
+            <div class="empty-state fade-in" style="width: 100%; text-align: center; padding: 28px 20px;">
+                <div class="icon" style="margin-bottom: 12px; filter: drop-shadow(0 0 16px rgba(145, 70, 255, 0.45)); color: var(--accent-hover); display: flex; justify-content: center;">${ICONS.zap(48)}</div>
+                <h2 style="margin-bottom: 8px; font-size: 20px; font-weight: 800; color: white;">Auto-Farm Running</h2>
+                <p style="color: var(--text-secondary); max-width: 440px; margin: 0 auto 20px; line-height: 1.5; font-size: 13.5px;">
+                    Bot is running and waiting for an active campaign with drops to farm.
+                </p>
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                    <button class="btn-danger" onclick="window.electronAPI.stopFarm(); masterAutoFarmEnabled=false; updateMasterAutoFarmUI();" style="width: auto; padding: 10px 22px;">Stop Auto-Farm</button>
+                    <button class="btn-secondary" onclick="document.getElementById('btnNavCampaigns').click()" style="width: auto; padding: 10px 22px;">Browse Campaigns</button>
+                </div>
+            </div>
+        `;
+        const dropsContainer = getEl('currentFarmDropsContainer');
+        if (dropsContainer) dropsContainer.style.display = 'none';
+        return;
+    }
+
+    // Truly idle.
+    heroCard.innerHTML = `
+        <div class="empty-state fade-in" style="width: 100%; text-align: center; padding: 28px 20px;">
+            <div class="icon" style="margin-bottom: 12px; filter: drop-shadow(0 0 16px rgba(145, 70, 255, 0.45)); color: var(--accent-hover); display: flex; justify-content: center;">${ICONS.gamepad(48)}</div>
+            <h2 style="margin-bottom: 8px; font-size: 20px; font-weight: 800; color: white;">Ready to Auto-Farm</h2>
+            <p style="color: var(--text-secondary); max-width: 440px; margin: 0 auto 20px; line-height: 1.5; font-size: 13.5px;">
+                Bot standing by. Click <b>Start Farm</b> in the sidebar or browse active campaigns to start earning Twitch drops automatically.
+            </p>
+            <div style="display: flex; gap: 12px; justify-content: center;">
+                <button class="btn-primary" onclick="document.getElementById('btnNavCampaigns').click()" style="width: auto; padding: 10px 22px;">Browse Active Campaigns</button>
+            </div>
+        </div>
+    `;
     const dropsContainer = getEl('currentFarmDropsContainer');
     if (dropsContainer) dropsContainer.style.display = 'none';
 }
