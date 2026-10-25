@@ -16,7 +16,7 @@
     <div class="header-brand">
       <img src="assets/icon.png" alt="Logo">
       <span class="header-brand-title">Drops Farmer Revived</span>
-      <span class="header-brand-version" id="headerBrandVersion" title="App version">v1.3.1</span>
+      <span class="header-brand-version" id="headerBrandVersion" title="App version">v1.3.6</span>
     </div>
 
     <!-- Persistent Active Farm Status Pill (Center Header) -->
@@ -259,6 +259,32 @@
           <div style="display: flex; gap: 10px; width: 100%;">
             <input type="text" id="autoFarmSearch" placeholder="Search any Twitch game…" style="flex: 1; padding: 9px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: white; outline: none; font-size: 13px;">
             <button id="btnAddCustomGame" class="btn-primary" style="width: auto; padding: 0 18px; white-space: nowrap; font-size: 13px; display: inline-flex; align-items: center; gap: 6px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add</button>
+          </div>
+        </div>
+
+        <!-- PRIORITY AUTO-FARM STREAMERS -->
+        <div class="farm-panel settings-panel" style="margin-bottom: 16px;">
+          <h3 style="margin-bottom: 4px; font-size: 15px; color: white; display: flex; align-items: center; gap: 6px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" class="svg-icon icon-eye"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" fill="rgba(56, 189, 248, 0.2)" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="#38bdf8"/></svg>
+            Priority Auto-Farm Streamers
+          </h3>
+          <p style="color: var(--text-secondary); margin-bottom: 16px; font-size: 12.5px;">Add specific streamer channel names to farm. When enabled, the auto-farm will cycle through these streamers instead of auto-discovering.</p>
+
+          <div id="selectedStreamersChips" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; min-height: 34px;">
+            <span style="color: var(--text-secondary); font-size: 13px; font-style: italic; align-self: center;">No priority streamers selected yet.</span>
+          </div>
+
+          <div style="display: flex; gap: 10px; width: 100%;">
+            <input type="text" id="autoFarmStreamerSearch" placeholder="Enter Twitch channel name (e.g., shroud, xqc, pokimane)..." style="flex: 1; padding: 9px 14px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: white; outline: none; font-size: 13px;">
+            <button id="btnAddCustomStreamer" class="btn-primary" style="width: auto; padding: 0 18px; white-space: nowrap; font-size: 13px; display: inline-flex; align-items: center; gap: 6px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add Streamer</button>
+          </div>
+
+          <div style="margin-top: 12px; padding: 10px; background: var(--bg-tertiary); border-radius: 8px; border: 1px solid var(--border-color);">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+              <input type="checkbox" id="toggleStreamerPriorityMode" style="width: 18px; height: 18px; accent-color: var(--accent-color);">
+              <span style="font-size: 13px; color: white;">Use Streamer Priority List (overrides game discovery)</span>
+            </label>
+            <p style="margin: 8px 0 0 28px; font-size: 11px; color: var(--text-secondary);">When checked, the auto-farm will only use the streamers in your priority list instead of searching for streamers automatically.</p>
           </div>
         </div>
 

@@ -693,16 +693,113 @@ let filteredCampaigns = [];
 let autoClaimEnabled = localStorage.getItem('autoClaimEnabled') !== 'false';
 let discordRPCEnabled = localStorage.getItem('discordRPCEnabled') === 'true';
 let rpcFarmingStartTimestamp = null;
-let currentGlobalDropSession = null;
-let currentFarmingChannelId = null;
+let currentAvailableStreamersList = [];
+let selectedStreamerForFarm = null;
 let currentFarmCampaignId = null;
 let activeFarmingCampaignId = null;
-let browsedCampaignId = null;
+let currentAvailableStreamersList = [];
+let selectedStreamerForFarm = null;
 let previewCampaignId = null;
 let activeFarmingChannelLogin = null;
 let masterAutoFarmEnabled = false;
 let tokenProcessingStarted = false;
-let manualOverrideId = null;
+let currentAvailableStreamersList = [];
+let selectedStreamerForFarm = null;
+
+async function showStreamerSelector(campaign, streamersList) {
+    const container = document.getElementById('heroMonitorCard');
+    if (!container) return;
+    
+    container.innerHTML = `
+        <div style="width: 100%; padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <img src="${getGameImageUrl(campaign.game, 60, 80)}" style="width: 60px; height: 80px; border-radius: 8px; object-fit: cover;" onerror="this.onerror=null; this.src='assets/icon.png'"/>
+                <div style="flex: 1;">
+                    <h2 style="margin: 0 0 4px 0; font-size: 18px; color: white;">Choose a Streamer</h2>
+                    <p style="margin: 0; color: var(--text-secondary); font-size: 13px;">${campaign.game?.displayName} - ${streamersList.length} stream${streamersList.length > 1 ? 's' : ''} available</p>
+                </div>
+                <button class="btn-secondary" onclick="cancelStreamerSelection()" style="width: auto; padding: 6px 12px;">Cancel</button>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; padding: 4px;">
+                ${streamersList.map((s, idx) => {
+                    const streamer = s.node || s;
+                    const login = streamer.broadcaster?.login || streamer.login || '';
+                    const title = streamer.title || '';
+                    return `
+                        <button class="streamer-select-btn" onclick="selectStreamerAndFarm('${campaign.id}', ${idx})" style="width: 100%; text-align: left; padding: 10px 14px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 8px; color: white; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 4px;" onmouseover="this.style.borderColor='var(--accent-color)'; this.style.background='var(--bg-secondary)'" onmouseout="this.style.borderColor='var(--border-color)'; this.style.background='var(--bg-tertiary)'">
+                            <div style="display: flex; align-items: center; justify-content: space-between;">
+                                <span style="font-weight: 600; font-size: 14px;">@${escapeHtml(login)}</span>
+                                <span style="color: var(--success); font-size: 11px;">● Live</span>
+                            </div>
+                            ${title ? `<div style="color: var(--text-secondary); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(title)}</div>` : ''}
+                        </button>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+    `;
+}
+
+window.selectStreamerAndFarm = async (campaignId, idx) => {
+    const campaign = allCampaigns.find(c => c.id === campaignId);
+    if (!campaign) return;
+    const streamerNode = currentAvailableStreamersList[idx]?.node || currentAvailableStreamersList[idx];
+    if (!streamerNode) return;
+    
+    const targetStreamer = streamerNode.broadcaster || streamerNode;
+    const streamerLogin = targetStreamer.login;
+    const streamerId = targetStreamer.id;
+    
+    currentFarmingChannelId = streamerId;
+    activeFarmingCampaignId = campaign.id;
+    activeFarmingChannelLogin = streamerLogin;
+    
+    startFarmingSimulation(campaign, false, false, 'farmPanel');
+    
+    const btnRunFarm = document.getElementById('btnRunFarm');
+    const btnStopFarm = document.getElementById('btnStopFarm');
+    
+    if (btnRunFarm) btnRunFarm.style.display = 'none';
+    if (btnStopFarm) btnStopFarm.style.display = 'flex';
+    
+    if (masterAutoFarmEnabled) {
+        startFarmingSimulation(campaign, false, false, 'farmPanel');
+    }
+    
+    window.electronAPI.startFarm(streamerLogin);
+    window.electronAPI.updateTrayTooltip(`Farming: ${campaign.game?.displayName || 'Game'}`);
+    addLog(`Watching ${streamerLogin}...`, 'farm');
+    showToast(`Farming ${campaign.game?.displayName} on ${streamerLogin}`, 'success');
+    
+    if (typeof progressionTracker !== 'undefined') {
+        progressionTracker[campaign.id] = { mins: -1, time: Date.now() };
+    }
+    
+    updateHeaderFarmWidget();
+    setTimeout(fetchAndUpdateCampaigns, 3000);
+};
+
+window.cancelStreamerSelection = () => {
+    const heroCard = document.getElementById('heroMonitorCard');
+    if (heroCard) {
+        heroCard.innerHTML = `<div class="empty-state" style="width: 100%; text-align: center; padding: 28px 20px;">
+            <div class="icon" style="margin-bottom: 12px; filter: drop-shadow(0 0 16px rgba(145, 70, 255, 0.45)); color: var(--accent-hover); display: flex; justify-content: center;">
+              <svg width="48" height="48" viewBox="0 0 24 24" class="svg-icon icon-gamepad"><rect x="2" y="6" width="20" height="12" rx="6" fill="rgba(168, 85, 247, 0.25)" stroke="#a855f7" stroke-width="2"/><line x1="6" y1="12" x2="10" y2="12" stroke="#e0e7ff" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="10" x2="8" y2="14" stroke="#e0e7ff" stroke-width="2" stroke-linecap="round"/><circle cx="15" cy="13" r="1.2" fill="#f43f5e"/><circle cx="17.5" cy="10.5" r="1.2" fill="#38bdf8"/></svg>
+            </div>
+            <h2 style="margin-bottom: 8px; font-size: 20px; font-weight: 800; color: white;">Ready to Auto-Farm</h2>
+            <p style="color: var(--text-secondary); max-width: 440px; margin: 0 auto 20px; line-height: 1.5; font-size: 13.5px;">
+              Bot standing by. Click <b>Start Farm</b> in the sidebar or browse active campaigns to start earning Twitch drops automatically.
+            </p>
+            <div style="display: flex; gap: 12px; justify-content: center;">
+              <button class="btn-primary" onclick="document.getElementById('btnNavCampaigns').click()" style="width: auto; padding: 10px 22px; font-size: 13px;">Browse Active Campaigns</button>
+            </div>
+          </div>`;
+    }
+    const btnRunFarm = document.getElementById('btnRunFarm');
+    const btnStopFarm = document.getElementById('btnStopFarm');
+    if (btnRunFarm) btnRunFarm.style.display = 'flex';
+    if (btnStopFarm) btnStopFarm.style.display = 'none';
+};
 let currentUserId = null;
 let wsDropProgress = {};
 let uiTimerInterval = null;
@@ -726,6 +823,7 @@ function getGameImageUrl(game, w, h) {
 let farmAllMode = localStorage.getItem('farmAllMode') === 'true';
 let stallThresholdSec = parseInt(localStorage.getItem('stallThresholdSec')) || 180;
 let showStallTimer = localStorage.getItem('showStallTimer') !== 'false';
+let streamerPriorityMode = localStorage.getItem('streamerPriorityMode') === 'true';
 
 // Startup & Automation Preferences State
 let autoLaunchEnabled = false;
@@ -916,6 +1014,22 @@ if (toggleDiscordRPC) {
     });
 }
 
+// Streamer Priority Mode
+const toggleStreamerPriorityEl = document.getElementById('toggleStreamerPriorityMode');
+if (toggleStreamerPriorityEl) {
+    toggleStreamerPriorityEl.checked = streamerPriorityMode;
+    toggleStreamerPriorityEl.addEventListener('change', () => {
+        streamerPriorityMode = toggleStreamerPriorityEl.checked;
+        localStorage.setItem('streamerPriorityMode', streamerPriorityMode ? 'true' : 'false');
+        updateMasterAutoFarmUI();
+        showToast(`Streamer Priority Mode ${streamerPriorityMode ? 'enabled' : 'disabled'}`, 'info');
+        addLog(`Streamer Priority Mode set to ${streamerPriorityMode ? 'ENABLED' : 'DISABLED'}`, 'system');
+        if (!streamerPriorityMode) {
+            sessionSkippedStreamers.clear();
+        }
+    });
+}
+
 // Persistent Top Header Live Farm Widget Updates
 function updateHeaderFarmWidget() {
     const dot = getEl('headerFarmStatusDot');
@@ -1056,7 +1170,78 @@ function savePriorityGames() {
     localStorage.setItem('autoFarmGames', selectedPriorityGames.join(', '));
 }
 
-const btnCheckUpdate = document.getElementById('btnCheckUpdate');
+let selectedStreamers = (localStorage.getItem('autoFarmStreamers') || '').split(',').map(s => s.trim()).filter(Boolean);
+
+function saveStreamers() {
+    localStorage.setItem('autoFarmStreamers', selectedStreamers.join(', '));
+}
+
+function addStreamerToList(name) {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return;
+    if (!selectedStreamers.some(s => s.toLowerCase() === trimmed.toLowerCase())) {
+        selectedStreamers.push(trimmed);
+        saveStreamers();
+        renderSelectedStreamers();
+        showToast(`Added ${trimmed} to priority streamers`, 'success');
+    }
+}
+
+function removeStreamerFromList(name) {
+    const trimmed = String(name || '').trim().toLowerCase();
+    selectedStreamers = selectedStreamers.filter(s => s.toLowerCase() !== trimmed);
+    saveStreamers();
+    renderSelectedStreamers();
+    showToast(`Removed from priority streamers`, 'info');
+}
+
+function moveStreamerInList(index, direction) {
+    const newIdx = index + direction;
+    if (newIdx < 0 || newIdx >= selectedStreamers.length) return;
+    const temp = selectedStreamers[index];
+    selectedStreamers[index] = selectedStreamers[newIdx];
+    selectedStreamers[newIdx] = temp;
+    saveStreamers();
+    renderSelectedStreamers();
+}
+
+function renderSelectedStreamers() {
+    const container = document.getElementById('selectedStreamersChips');
+    if (!container) return;
+    if (selectedStreamers.length === 0) {
+        container.innerHTML = '<span style="color: var(--text-secondary); font-size: 13px; font-style: italic; align-self: center;">No priority streamers selected yet.</span>';
+        return;
+    }
+    container.innerHTML = selectedStreamers.map((streamer, index) => {
+        const displayName = streamer.split(' ')[0] || streamer;
+        return `<div style="background: rgba(145,70,255,0.14); border: 1px solid var(--accent-color); color: white; padding: 5px 12px; border-radius: 20px; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px;">
+            <div style="display:flex; flex-direction: row; gap: 4px; line-height: 1;">
+                <span onclick="moveStreamerInList(${index}, -1)" style="cursor:pointer; opacity: 0.6; display:flex; align-items:center; padding: 2px;" title="Move Up"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></span>
+                <span onclick="moveStreamerInList(${index}, 1)" style="cursor:pointer; opacity: 0.6; display:flex; align-items:center; padding: 2px;" title="Move Down"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></span>
+            </div>
+            <span style="cursor: pointer; display:flex; align-items:center; color: var(--danger); margin-left: 2px; font-size: 12px;" onclick="removeStreamerFromList('${encodeURIComponent(streamer)}')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
+            <span>${escapeHtml(displayName)}</span>
+        </div>`;
+    }).join('');
+    // Kick off any art lookups if needed
+}
+
+// Add event listeners for streamer management
+const btnAddCustomStreamer = document.getElementById('btnAddCustomStreamer');
+if (btnAddCustomStreamer) {
+    btnAddCustomStreamer.onclick = () => {
+        const search = document.getElementById('autoFarmStreamerSearch');
+        if (search) {
+            addStreamerToList(search.value);
+            search.value = '';
+        }
+    };
+}
+
+// Load streamers on init
+document.addEventListener('DOMContentLoaded', () => {
+    renderSelectedStreamers();
+});
 if (btnCheckUpdate) {
     btnCheckUpdate.onclick = () => checkUpdates();
 }
@@ -2113,9 +2298,8 @@ async function cycleCampaign(direction, autoStart = false) {
     }
 }
 
-let isFarmingLoopBusy = false;
-
-async function runMasterFarmLoop() {
+let currentAvailableStreamersList = [];
+let selectedStreamerForFarm = null;
     if (isFarmingLoopBusy) return;
     if (!masterAutoFarmEnabled && !activeFarmingCampaignId) return;
 
@@ -3303,10 +3487,50 @@ async function startFarmAction(campaign, isAuto = false) {
             whitelistedLogins = campaign.allow.channels.map(ch => ch.name);
         }
 
-        const res = await window.electronAPI.findStreamer(campaign.game?.displayName || '', accountTokens, whitelistedLogins);
-        if (campaignIdBeingStarted !== campaign.id) return;
+        // Streamer Priority Mode: if enabled and a streamer list exists, use those
+        // specific streamers instead of auto-discovering via game search.
+        let targetStreamerLogins = null;
+        if (streamerPriorityMode) {
+            const logins = selectedStreamers.map(s => String(s).trim()).filter(Boolean);
+            if (logins.length > 0) {
+                targetStreamerLogins = logins;
+            }
+        }
 
-        const streams = res?.data?.game?.streams?.edges || [];
+        let streams = [];
+        let foundTargetFromPriorityList = false;
+        if (targetStreamerLogins) {
+            // Check each streamer in the priority list for a live stream via GQL
+            for (const login of targetStreamerLogins) {
+                const userRes = await window.electronAPI.findStreamer(login, accountTokens, null).catch(() => null);
+                // findStreamer with a login returns the game query path, not users lookup.
+                // Instead, we use users lookup via the find-streamer IPC handler when whitelistedLogins is set.
+                const usersRes = await fetchStreamersByLogins([login], accountTokens);
+                const users = usersRes?.data?.users || [];
+                const liveUser = users.find(u => u && u.stream);
+                if (liveUser) {
+                    const streamerNode = {
+                        node: {
+                            title: liveUser.stream.title || '',
+                            broadcaster: {
+                                id: liveUser.id,
+                                login: liveUser.login
+                            },
+                            freeformTags: liveUser.stream.freeformTags || []
+                        }
+                    };
+                    foundTargetFromPriorityList = true;
+                    streams.push(streamerNode);
+                    break;
+                }
+            }
+        }
+
+        if (!foundTargetFromPriorityList) {
+            const res = await window.electronAPI.findStreamer(campaign.game?.displayName || '', accountTokens, whitelistedLogins);
+            if (campaignIdBeingStarted !== campaign.id) return;
+            streams = res?.data?.game?.streams?.edges || [];
+        }
 
         const validStreams = streams.filter(s => {
             if (whitelistedLogins) return true;
@@ -3331,6 +3555,26 @@ async function startFarmAction(campaign, isAuto = false) {
             const isSessionSkipped = sessionSkippedStreamers.has(login);
             return !login || (!isBlacklisted && !isSessionSkipped);
         });
+
+        if (availableStreams.length > 1 && !whitelistedLogins && !targetStreamerLogins) {
+            currentAvailableStreamersList = availableStreams;
+            showStreamerSelector(campaign, availableStreams);
+            if (farmStatus) farmStatus.innerText = `${availableStreams.length} streamers available - select one`;
+            if (btnRunFarm) btnRunFarm.style.display = 'flex';
+            if (btnStopFarm) btnStopFarm.style.display = 'none';
+            if (typeof campaignIdBeingStarted !== 'undefined') campaignIdBeingStarted = null;
+            return;
+        }
+
+        // If multiple streamers available and not in priority/whitelist strict mode, show selection
+        if (availableStreams.length > 1 && !whitelistedLogins && !targetStreamerLogins) {
+            currentAvailableStreamersList = availableStreams;
+            showStreamerSelector(campaign, availableStreams);
+            if (farmStatus) farmStatus.innerText = `${availableStreams.length} streamers available - select one`;
+            if (btnRunFarm) btnRunFarm.style.display = 'flex';
+            if (btnStopFarm) btnStopFarm.style.display = 'none';
+            return;
+        }
 
         let targetStreamerNode = null;
         const targetGameId = campaign.game?.id;
