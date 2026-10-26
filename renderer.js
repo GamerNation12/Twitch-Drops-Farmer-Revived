@@ -297,6 +297,14 @@ function applyCurrentFilters() {
         const matchesViewers = minViewersThreshold <= 0 || (c.game?.viewersCount || 0) >= minViewersThreshold;
         return matchesCategory && matchesSearch && matchesPaid && matchesViewers;
     });
+
+    // Fallback: if filtering removed everything but Twitch returned campaigns,
+    // show all of them so the UI isn't stuck on "No campaigns found."
+    if (filteredCampaigns.length === 0 && allCampaigns.length > 0 && !searchVal) {
+        addLog(`[Filters] Filters removed all ${allCampaigns.length} campaigns — showing all instead.`, 'warn');
+        filteredCampaigns = [...allCampaigns];
+    }
+
     addLog(`[Filters] ${filteredCampaigns.length} campaigns after filters (category=${currentCategory}).`, 'info');
     renderCampaignsListItems();
 }
