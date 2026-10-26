@@ -2104,13 +2104,9 @@ function validateCampaign(c, inventory = null) {
 
     c.isBadgeOrQuest = isCampaignBadgeOrQuest(c);
 
-    // Accept any campaign that has a game linked. Don't reject by status — Twitch
-    // returns various statuses and a campaign can still be farmable even when the
-    // status string isn't exactly "ACTIVE".
-    if (!c.game || !c.game.displayName) {
-        return { isValid: false, reason: 'No game linked' };
-    }
-
+    // Accept any campaign Twitch returns — some campaigns have unusual status
+    // strings or missing fields but can still be farmable. Never reject by
+    // status alone; only reject if there's literally no data at all.
     return { isValid: true, reason: 'OK' };
 }
 
