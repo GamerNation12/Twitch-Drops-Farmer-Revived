@@ -2104,26 +2104,11 @@ function validateCampaign(c, inventory = null) {
 
     c.isBadgeOrQuest = isCampaignBadgeOrQuest(c);
 
-    // Accept any campaign that has a game linked and some drop data.
-    // Twitch returns various statuses; don't reject by status alone.
+    // Accept any campaign that has a game linked. Don't reject by status — Twitch
+    // returns various statuses and a campaign can still be farmable even when the
+    // status string isn't exactly "ACTIVE".
     if (!c.game || !c.game.displayName) {
         return { isValid: false, reason: 'No game linked' };
-    }
-
-    const gameName = (c.game.displayName || '').toLowerCase();
-    const badGames = ['just chatting', 'общение', 'irl'];
-    if (badGames.some(bad => gameName.includes(bad))) {
-        if (!c.isBadgeOrQuest) {
-            return { isValid: false, reason: 'Just Chatting (badge-only)' };
-        }
-    }
-
-    const now = new Date();
-    const end = new Date(c.endAt);
-
-    // Only reject if clearly ended (more than 1 day past end date)
-    if (end && !isNaN(end.getTime()) && now > new Date(end.getTime() + 24 * 60 * 60 * 1000)) {
-        return { isValid: false, reason: 'Already ended' };
     }
 
     return { isValid: true, reason: 'OK' };
@@ -3339,14 +3324,20 @@ function renderCampaignsListItems() {
             }
         });
 
-        if (filteredCampaigns.length === 0) {
+        let displayCampaigns = filteredCampaigns;
+        if (displayCampaigns.length === 0 && allCampaigns.length > 0 && !document.getElementById('campaignSearch')?.value) {
+            addLog(`[Filters] Filters removed all ${allCampaigns.length} campaigns — showing all instead.`, 'warn');
+            displayCampaigns = [...allCampaigns];
+        }
+
+        if (displayCampaigns.length === 0) {
             campaignsContainer.innerHTML = '<p style="color: var(--text-secondary); grid-column: 1/-1;">No campaigns found.</p>';
             return;
         }
 
         const fragment = document.createDocumentFragment();
 
-        filteredCampaigns.forEach(c => {
+        displayCampaigns.forEach(c => {
             try {
                 if (!c || !c.game) return;
 
@@ -3359,16 +3350,17 @@ function renderCampaignsListItems() {
                 const isGameBanned = ignoredGameNames.includes(c.game?.displayName?.toLowerCase() || '');
                 const isCampIgnored = ignoredCampaignIds.includes(c.id);
                 const isIgnored = isGameBanned || isCampIgnored;
+                const isFarmingThis = activeFarmingCampaignId === c.id;
 
                 const card = document.createElement('div');
                 card.className = 'campaign-card';
                 card.onclick = () => openPreviewDrawer(c);
 
                 if (isFinished) {
-                    card.style.opacity = '0.4';
-                    card.style.filter = 'grayscale(0.8)';
-                } else if (isGameBanned) {
-                    card.style.opacity = '0.25';
+                    card.style.opacity = '0.5';
+                    card.style.filter = 'grayscale(0.6)';
+                } else if (isIgnored) {
+                    card.style.opacity = '0.3';
                     card.style.filter = 'grayscale(1)';
                 } else if (isPriority) {
                     card.style.borderColor = 'var(--accent-color)';
@@ -3391,30 +3383,34 @@ function renderCampaignsListItems() {
                 const barColor = isFinished ? 'var(--success)' : (isIgnored ? '#444' : 'var(--accent-color)');
 
                 card.innerHTML = `
-          <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; z-index: 10;">
-              <button class="btn-ignore-campaign ${isCampIgnored ? 'active-ignore' : ''}" title="${isCampIgnored ? 'Unignore Campaign' : 'Ignore Campaign'}" onclick="event.stopPropagation(); toggleIgnoreCampaign('${c.id}')">
-                  ${isCampIgnored ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'}
-              </button>
-              <button class="btn-ignore-campaign ${isGameBanned ? 'active-ignore' : ''}" title="${isGameBanned ? 'Unban Game' : 'Ban Game'}" onclick="event.stopPropagation(); toggleIgnoreGame('${encodeGameParam(c.game?.displayName)}')">
-                  ${isGameBanned ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>'}
-              </button>
-          </div>
-          
-          <div class="campaign-card-header">
-            <img src="${imgUrl}" class="campaign-cover-img" onerror="this.onerror=null; this.src='https://static-cdn.jtvnw.net/ttv-boxart/488190-144x192.jpg'"/>
-            <div class="campaign-title-block">
-              <div class="campaign-game-name">${c.game?.displayName}</div>
-              <div style="font-size: 11px; color: var(--text-secondary); display: flex; gap: 6px;">
-                <span>${totalDrops} Rewards</span> · <span>${claimedDrops} Claimed</span>
+          <div class="campaign-card-header" style="position: relative;">
+              <img src="${imgUrl}" class="campaign-cover-img" onerror="this.onerror=null; this.src='https://static-cdn.jtvnw.net/ttv-boxart/488190-144x192.jpg'"/>
+              <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; z-index: 10;">
+                  <button class="btn-ignore-campaign ${isCampIgnored ? 'active-ignore' : ''}" title="${isCampIgnored ? 'Unignore Campaign' : 'Ignore Campaign'}" onclick="event.stopPropagation(); toggleIgnoreCampaign('${c.id}')">
+                      ${isCampIgnored ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'}
+                  </button>
+                  <button class="btn-ignore-campaign ${isGameBanned ? 'active-ignore' : ''}" title="${isGameBanned ? 'Unban Game' : 'Ban Game'}" onclick="event.stopPropagation(); toggleIgnoreGame('${encodeGameParam(c.game?.displayName)}')">
+                      ${isGameBanned ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>'}
+                  </button>
               </div>
-              <div style="font-size: 11px; margin-top: 2px;">
-                ${isFinished ? `<span style="color:var(--success); font-weight:700; display:inline-flex; align-items:center; gap:3px;">${ICONS.check(11)} Completed</span>` : `<span style="color:var(--warning); display:inline-flex; align-items:center; gap:3px;">${ICONS.clock(11)} Ends ${endStr}</span>`}
-              </div>
-            </div>
-          </div>
 
-          <div class="campaign-progress-track ${c.id === activeFarmingCampaignId ? 'is-farming' : ''}" style="margin-top: 4px; height: 5px; width: 100%; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; position: relative;">
-              <div class="${c.id === activeFarmingCampaignId ? 'progress-active' : ''}" style="height: 100%; width: ${totalPercent}%; background: ${barColor}; border-radius: 3px; transition: width 0.3s ease;"></div>
+              <div class="campaign-info">
+                  <div style="display: flex; align-items: start; gap: 10px;">
+                      <div class="campaign-game-name" style="font-size: 15px; font-weight: 700; color: white;">${c.game?.displayName}</div>
+                      <div class="campaign-time" style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">
+                          ${isFinished ? `<span style="color:var(--success); font-weight:700; display:inline-flex; align-items:center; gap:3px;">${ICONS.check(11)} Completed</span>` : `<span style="color:var(--warning); display:inline-flex; align-items:center; gap:3px;">${ICONS.clock(11)} Ends ${endStr}</span>`}
+                      </div>
+                  </div>
+                  <div class="campaign-stats" style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; display: flex; gap: 10px;">
+                      <span>${totalDrops} Rewards</span>
+                      <span>· ${claimedDrops} Claimed</span>
+                      ${isPriority ? '<span style="color: var(--accent-color); font-weight: 700;">● Priority</span>' : ''}
+                  </div>
+              </div>
+
+              <div class="campaign-progress-track" style="margin-top: 6px; height: 6px; width: 100%; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden;">
+                  <div class="${c.id === activeFarmingCampaignId ? 'progress-active' : ''}" style="height: 100%; width: ${totalPercent}%; background: ${barColor}; border-radius: 4px; transition: width 0.3s ease;"></div>
+              </div>
           </div>
         `;
                 fragment.appendChild(card);
