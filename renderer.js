@@ -2096,10 +2096,8 @@ function validateCampaign(c, inventory = null) {
 
     c.isBadgeOrQuest = isCampaignBadgeOrQuest(c);
 
-    if (!c.timeBasedDrops || c.timeBasedDrops.length === 0) {
-        return { isValid: false, reason: 'No time-based drops' };
-    }
-
+    // Accept any campaign that has a game linked and some drop data.
+    // Twitch returns various statuses; don't reject by status alone.
     if (!c.game || !c.game.displayName) {
         return { isValid: false, reason: 'No game linked' };
     }
@@ -2113,48 +2111,11 @@ function validateCampaign(c, inventory = null) {
     }
 
     const now = new Date();
-    const start = new Date(c.startAt);
     const end = new Date(c.endAt);
 
     // Only reject if clearly ended (more than 1 day past end date)
     if (end && !isNaN(end.getTime()) && now > new Date(end.getTime() + 24 * 60 * 60 * 1000)) {
         return { isValid: false, reason: 'Already ended' };
-    }
-
-    if (c.isBadgeOrQuest) {
-        return { isValid: true, reason: 'OK' };
-    }
-
-    const minutesLeft = (end.getTime() - now.getTime()) / (1000 * 60);
-
-    if (inventory) {
-        const ipCamp = inventory.dropCampaignsInProgress?.find(ip => ip.id === c.id);
-
-        const canFinishSomething = c.timeBasedDrops.some(drop => {
-            if (drop.self?.isClaimed) return false;
-
-            const ipDrop = ipCamp?.timeBasedDrops?.find(d => d.id === drop.id);
-            const currentMins = ipDrop?.self?.currentMinutesWatched || drop.self?.currentMinutesWatched || 0;
-            const remainingMins = (drop.requiredMinutesWatched || 0) - currentMins;
-
-            return minutesLeft >= remainingMins;
-        });
-
-        if (!canFinishSomething) {
-            return { isValid: false, reason: 'Impossible to complete (Too little time left)' };
-        }
-    } else {
-        if (minutesLeft < 1) return { isValid: false, reason: 'Campaign ending in < 1m' };
-    }
-
-    const hasSubRequirement = c.timeBasedDrops.some(d => (d.requiredSubs || 0) > 0);
-    if (hasSubRequirement) {
-        return { isValid: false, reason: 'Requires subscription' };
-    }
-
-    const validDrops = c.timeBasedDrops.filter(d => (d.requiredMinutesWatched || 0) > 0);
-    if (validDrops.length === 0) {
-        return { isValid: false, reason: 'All drops have 0 minutes requirement' };
     }
 
     return { isValid: true, reason: 'OK' };
