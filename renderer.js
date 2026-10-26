@@ -2100,10 +2100,6 @@ function validateCampaign(c, inventory = null) {
         return { isValid: false, reason: 'No time-based drops' };
     }
 
-    if (c.status !== 'ACTIVE') {
-        return { isValid: false, reason: `Status: ${c.status}` };
-    }
-
     if (!c.game || !c.game.displayName) {
         return { isValid: false, reason: 'No game linked' };
     }
@@ -2120,8 +2116,10 @@ function validateCampaign(c, inventory = null) {
     const start = new Date(c.startAt);
     const end = new Date(c.endAt);
 
-    if (now < new Date(start.getTime() - 5 * 60000)) return { isValid: false, reason: 'Not started yet' };
-    if (now > new Date(end.getTime() + 5 * 60000)) return { isValid: false, reason: 'Already ended' };
+    // Only reject if clearly ended (more than 1 day past end date)
+    if (end && !isNaN(end.getTime()) && now > new Date(end.getTime() + 24 * 60 * 60 * 1000)) {
+        return { isValid: false, reason: 'Already ended' };
+    }
 
     if (c.isBadgeOrQuest) {
         return { isValid: true, reason: 'OK' };
