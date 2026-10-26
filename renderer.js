@@ -297,6 +297,7 @@ function applyCurrentFilters() {
         const matchesViewers = minViewersThreshold <= 0 || (c.game?.viewersCount || 0) >= minViewersThreshold;
         return matchesCategory && matchesSearch && matchesPaid && matchesViewers;
     });
+    addLog(`[Filters] ${filteredCampaigns.length} campaigns after filters (category=${currentCategory}).`, 'info');
     renderCampaignsListItems();
 }
 
@@ -2582,7 +2583,10 @@ async function fetchAndUpdateCampaigns() {
 
     try {
         const response = await window.electronAPI.getCampaigns(accountTokens);
-        if (!response) return false;
+        if (!response) {
+            addLog('[Campaigns] No response from Twitch.', 'warn');
+            return false;
+        }
 
         if (response.error === 'AUTH_EXPIRED') {
             handleAuthExpired();
@@ -2610,26 +2614,24 @@ async function fetchAndUpdateCampaigns() {
             userData = response?.data?.currentUser;
         }
 
-        // LOCAL PATCH: dropCampaigns coming back null/absent means Twitch
-        // refused this web query - in practice a missing or stale integrity
-        // token (the TV client id has the same effect, see WEB_CLIENT_ID).
-        // Kick the security refresh instead of silently showing an empty list.
         const campaignDataMissing = !userData || userData.dropCampaigns == null;
-        if (campaignDataMissing && accountTokens && accountTokens.auth && Date.now() - lastIntegrityKick > 60000) {
-            lastIntegrityKick = Date.now();
-            addLog('🔒 [Security] Refreshing Twitch security token in background...', 'info');
-            window.electronAPI.refreshIntegrityToken();
-            showLoadingPlaceholder("Validating security token in background...");
+        if (campaignDataMissing) {
+            addLog('[Campaigns] Twitch returned no drop campaign data (may need re-login).', 'warn');
+            if (accountTokens && accountTokens.auth && Date.now() - lastIntegrityKick > 60000) {
+                lastIntegrityKick = Date.now();
+                window.electronAPI.refreshIntegrityToken();
+                showLoadingPlaceholder("Validating security token in background...");
 
-            if (integritySafetyTimer) clearTimeout(integritySafetyTimer);
-            integritySafetyTimer = setTimeout(() => {
-                const c = document.getElementById('campaignsContainer');
-                if (c && (!allCampaigns || allCampaigns.length === 0)) {
-                    showIntegrityFailedUI();
-                }
-            }, 14000);
-
-            return false;
+                if (integritySafetyTimer) clearTimeout(integritySafetyTimer);
+                integritySafetyTimer = setTimeout(() => {
+                    const c = document.getElementById('campaignsContainer');
+                    if (c && (!allCampaigns || allCampaigns.length === 0)) {
+                        showIntegrityFailedUI();
+                    }
+                }, 14000);
+            }
+            // Still proceed to render whatever we have (possibly empty) so the UI
+            // doesn't stay stuck on "Loading campaigns from Twitch..."
         }
 
         if (!userData) {
@@ -2640,6 +2642,7 @@ async function fetchAndUpdateCampaigns() {
         }
 
         const rawCampaigns = userData.dropCampaigns || [];
+        addLog(`[Campaigns] ${rawCampaigns.length} raw campaigns from Twitch.`, 'info');
         const sessionFromCampaign = userData.dropCurrentSession || null;
         if (sessionFromCampaign && sessionFromCampaign.game) {
             currentGlobalDropSession = sessionFromCampaign;
@@ -2683,7 +2686,10 @@ async function fetchAndUpdateCampaigns() {
             const start = new Date(c.startAt);
             const end = new Date(c.endAt);
             const drops = (c.timeBasedDrops || []).filter(d => c.isBadgeOrQuest || (d.requiredMinutesWatched || 0) > 0);
-            if (drops.length === 0) continue;
+            if (drops.length === 0) {
+                addLog(`[Skip] ${c.game?.displayName || 'Unknown'}: no valid time-based drops`, 'system');
+                continue;
+            }
 
             c.timeBasedDrops = drops;
             c.timeBasedDrops.sort((a, b) => a.requiredMinutesWatched - b.requiredMinutesWatched);
@@ -2718,6 +2724,7 @@ async function fetchAndUpdateCampaigns() {
         }
 
         allCampaigns = finalCampaigns;
+        addLog(`[Campaigns] ${finalCampaigns.length} campaigns passed validation.`, 'info');
         allCampaigns.sort((a, b) => (b.game?.viewersCount || 0) - (a.game?.viewersCount || 0));
 
         applyCurrentFilters();
