@@ -2633,13 +2633,7 @@ async function fetchAndUpdateCampaigns() {
 
             const start = new Date(c.startAt);
             const end = new Date(c.endAt);
-            const drops = (c.timeBasedDrops || []).filter(d => c.isBadgeOrQuest || (d.requiredMinutesWatched || 0) > 0);
-            if (drops.length === 0) {
-                addLog(`[Skip] ${c.game?.displayName || 'Unknown'}: no valid time-based drops`, 'system');
-                continue;
-            }
-
-            c.timeBasedDrops = drops;
+            c.timeBasedDrops = (c.timeBasedDrops || []).filter(d => c.isBadgeOrQuest || (d.requiredMinutesWatched || 0) > 0);
             c.timeBasedDrops.sort((a, b) => a.requiredMinutesWatched - b.requiredMinutesWatched);
 
             const ipCamp = inProgressMap.get(c.id);
