@@ -290,18 +290,14 @@ function applyCurrentFilters() {
     const clearBtn = getEl('btnClearCampaignSearch');
     if (clearBtn) clearBtn.style.display = searchVal ? 'flex' : 'none';
 
-    filteredCampaigns = allCampaigns.filter(c => {
-        const matchesCategory = currentCategory === 'drops' ? !c.isBadgeOrQuest : c.isBadgeOrQuest;
-        const matchesSearch = !searchVal || c.game?.displayName?.toLowerCase().includes(searchVal);
-        const matchesPaid = !(currentCategory === 'badges' && hidePaidBadges && c._badgePaid);
-        const matchesViewers = minViewersThreshold <= 0 || (c.game?.viewersCount || 0) >= minViewersThreshold;
-        return matchesCategory && matchesSearch && matchesPaid && matchesViewers;
-    });
-
-    // Fallback: if filtering removed everything but Twitch returned campaigns,
-    // show all of them so the UI isn't stuck on "No campaigns found."
-    if (filteredCampaigns.length === 0 && allCampaigns.length > 0 && !searchVal) {
-        addLog(`[Filters] Filters removed all ${allCampaigns.length} campaigns — showing all instead.`, 'warn');
+    // Only filter when the user types in the search box. Otherwise show every
+    // campaign Twitch returned — category/viewer/paid filters can hide everything
+    // and leave the UI stuck on "No campaigns found."
+    if (searchVal) {
+        filteredCampaigns = allCampaigns.filter(c =>
+            c.game?.displayName?.toLowerCase().includes(searchVal)
+        );
+    } else {
         filteredCampaigns = [...allCampaigns];
     }
 
