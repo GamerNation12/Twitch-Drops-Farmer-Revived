@@ -3511,7 +3511,7 @@ async function startFarmAction(campaign, isAuto = false) {
                 const userRes = await window.electronAPI.findStreamer(login, accountTokens, null).catch(() => null);
                 // findStreamer with a login returns the game query path, not users lookup.
                 // Instead, we use users lookup via the find-streamer IPC handler when whitelistedLogins is set.
-                const usersRes = await fetchStreamersByLogins([login], accountTokens);
+                const usersRes = await window.electronAPI.findStreamer(null, accountTokens, [login]).catch(() => null);
                 const users = usersRes?.data?.users || [];
                 const liveUser = users.find(u => u && u.stream);
                 if (liveUser) {
@@ -3656,7 +3656,11 @@ async function startFarmAction(campaign, isAuto = false) {
         renderIdlePlaceholder();
         setTimeout(fetchAndUpdateCampaigns, 3000);
     } catch (e) {
+        console.error('startFarmAction error:', e);
+        addLog(`Farm start failed: ${e.message || String(e)}`, 'error');
+        showToast(`Farm start failed: ${e.message || String(e)}`, 'error');
         if (btnRunFarm) btnRunFarm.style.display = 'flex';
+        if (btnStopFarm) btnStopFarm.style.display = 'none';
     }
 }
 
