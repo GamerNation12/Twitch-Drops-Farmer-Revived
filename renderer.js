@@ -2312,22 +2312,7 @@ async function runMasterFarmLoop() {
                                 statusArea.innerHTML = (rem > 0)
                                     ? `<span class="stall-timer-badge warning">${ICONS.clock(11)} Stall check: ${rem}s</span>`
                                     : `<span class="stall-timer-badge danger">${ICONS.warn(11)} Stall verified!</span>`;
-    } else if (masterAutoFarmEnabled) {
-        if (dot) {
-            dot.className = 'status-indicator yellow';
-            dot.style.boxShadow = '0 0 8px var(--warning)';
-        }
-        if (text) text.innerText = 'Running';
-        if (subtext) subtext.innerText = '— Waiting for campaign…';
-        if (btnSkip) btnSkip.style.display = 'none';
-        if (currentFarmTitle) {
-            currentFarmTitle.innerText = 'Running';
-            currentFarmTitle.style.color = 'var(--text-warning)';
-        }
-        if (statsWorkerStatus) {
-            statsWorkerStatus.innerHTML = `<span style="color: var(--warning); font-size: 14px; font-weight:700;">Waiting for campaign…</span>`;
-        }
-    } else {
+                            } else {
                                 statusArea.innerHTML = '';
                             }
                         } else if (uiTimerInterval) {
@@ -3493,8 +3478,7 @@ async function startFarmAction(campaign, isAuto = false) {
             whitelistedLogins = campaign.allow.channels.map(ch => ch.name);
         }
 
-        // Streamer Priority Mode: if enabled and a streamer list exists, use those
-        // specific streamers instead of auto-discovering via game search.
+        // Streamer Priority Mode: use selected streamers instead of game search
         let targetStreamerLogins = null;
         if (streamerPriorityMode) {
             const logins = selectedStreamers.map(s => String(s).trim()).filter(Boolean);
@@ -3504,18 +3488,15 @@ async function startFarmAction(campaign, isAuto = false) {
         }
 
         let streams = [];
-        let foundTargetFromPriorityList = false;
+
         if (targetStreamerLogins) {
-            // Check each streamer in the priority list for a live stream via GQL
+            // Priority mode: check each streamer for a live stream
             for (const login of targetStreamerLogins) {
-                const userRes = await window.electronAPI.findStreamer(login, accountTokens, null).catch(() => null);
-                // findStreamer with a login returns the game query path, not users lookup.
-                // Instead, we use users lookup via the find-streamer IPC handler when whitelistedLogins is set.
                 const usersRes = await window.electronAPI.findStreamer(null, accountTokens, [login]).catch(() => null);
                 const users = usersRes?.data?.users || [];
                 const liveUser = users.find(u => u && u.stream);
                 if (liveUser) {
-                    const streamerNode = {
+                    streams.push({
                         node: {
                             title: liveUser.stream.title || '',
                             broadcaster: {
@@ -3524,113 +3505,85 @@ async function startFarmAction(campaign, isAuto = false) {
                             },
                             freeformTags: liveUser.stream.freeformTags || []
                         }
-                    };
-                    foundTargetFromPriorityList = true;
-                    streams.push(streamerNode);
+                    });
                     break;
                 }
             }
         }
 
-        if (!foundTargetFromPriorityList) {
+        if (!streams.length) {
+            // Game search mode: find live streams for the campaign's game
             const res = await window.electronAPI.findStreamer(campaign.game?.displayName || '', accountTokens, whitelistedLogins);
             if (campaignIdBeingStarted !== campaign.id) return;
             streams = res?.data?.game?.streams?.edges || [];
         }
-
-        const validStreams = streams.filter(s => {
-            if (whitelistedLogins) return true;
-
-            const tags = (s.node.freeformTags || []).map(t => t.name.toLowerCase());
-            const title = (s.node.title || '').toLowerCase();
-
-            return tags.some(t => t.includes('drops')) ||
-                title.includes('drops') ||
-                title.includes('!drops') ||
-                title.includes('дропс');
-        });
 
         if (activeFarmingCampaignId !== campaign.id) {
             sessionSkippedStreamers.clear();
         }
 
         const now = Date.now();
-        const availableStreams = validStreams.filter(s => {
+        const availableStreams = streams.filter(s => {
             const login = (s.node?.broadcaster?.login || '').toLowerCase();
             const isBlacklisted = streamerBlacklist[login] && now <= streamerBlacklist[login];
             const isSessionSkipped = sessionSkippedStreamers.has(login);
             return !login || (!isBlacklisted && !isSessionSkipped);
         });
 
-        // Cache list for the Change Streamer button; auto-pick first instead of blocking.
         currentAvailableStreamersList = availableStreams;
 
+        if (availableStreams.length === 0) {
+            const gameName = campaign.game?.displayName || 'Game';
+            addLog(`No live streamers found for ${gameName}.`, 'warn');
+            showToast(`No live streamers found for ${gameName}`, 'warn');
+            if (farmStatus) farmStatus.innerText = 'No live streamers found.';
+            if (btnRunFarm) btnRunFarm.style.display = 'flex';
+            if (btnStopFarm) btnStopFarm.style.display = 'none';
+
+            if (!manualOverrideId) {
+                stallBlacklist[campaign.id] = Date.now() + 30 * 60 * 1000;
+                delete campaignFailedStreamerCounts[campaign.id];
+                setTimeout(() => {
+                    cycleCampaign(1, true);
+                }, 600);
+            }
+            return;
+        }
+
+        // Pick first available streamer; optional GQL pre-check with fallback
         let targetStreamerNode = null;
         const targetGameId = campaign.game?.id;
         const targetGameName = (campaign.game?.displayName || '').toLowerCase();
 
-        // GQL Pre-Check: verify active drops on channel before starting stream
-        for (const candidate of availableStreams.slice(0, 5)) {
+        for (const candidate of availableStreams.slice(0, 3)) {
             const streamerId = candidate.node?.broadcaster?.id;
             const login = candidate.node?.broadcaster?.login;
             if (!streamerId || !login) continue;
 
-            const isWhitelisted = whitelistedLogins && whitelistedLogins.length > 0;
-
             try {
-                const dropCheck = await window.electronAPI.checkChannelDrops(streamerId, accountTokens);
+                const dropCheck = await window.electronAPI.checkChannelDrops(streamerId, accountTokens).catch(() => null);
                 const activeCampaignsOnChannel = dropCheck?.data?.channelDropCampaignsProgress || [];
-
-                const isConfirmed = isWhitelisted || (activeCampaignsOnChannel.length > 0 && activeCampaignsOnChannel.some(dc =>
+                const isConfirmed = whitelistedLogins?.length > 0 || (activeCampaignsOnChannel.length > 0 && activeCampaignsOnChannel.some(dc =>
                     (dc.game?.id && String(dc.game.id) === String(targetGameId)) ||
                     (dc.game?.name && dc.game.name.toLowerCase() === targetGameName) ||
                     (dc.name && dc.name.toLowerCase().includes(targetGameName)) ||
                     dc.id === campaign.id
                 ));
 
-                if (isConfirmed) {
-                    const tagInfo = isWhitelisted ? ' (Whitelisted Channel)' : '';
-                    addLog(`✓ [GQL Pre-Check] @${login} has confirmed active Drops for ${campaign.game?.displayName || campaign.name}${tagInfo}!`, 'success');
+                if (isConfirmed || !dropCheck) {
                     targetStreamerNode = candidate.node;
                     break;
-                } else if (dropCheck?.data) {
-                    addLog(`⚠️ [GQL Pre-Check] @${login} drops inactive for ${campaign.game?.displayName || campaign.name}. Trying next candidate...`, 'warn');
-                    sessionSkippedStreamers.add(login.toLowerCase());
                 } else {
-                    // Query error or challenge: fallback to watching this stream
-                    targetStreamerNode = candidate.node;
-                    break;
+                    sessionSkippedStreamers.add(login.toLowerCase());
                 }
             } catch (err) {
-                console.error("GQL Pre-check error:", err);
                 targetStreamerNode = candidate.node;
                 break;
             }
         }
 
         if (!targetStreamerNode) {
-            if (availableStreams.length > 0) {
-                targetStreamerNode = availableStreams[0].node;
-            } else if (streams.length > 0) {
-                targetStreamerNode = streams[0].node;
-            } else {
-                const gameName = campaign.game?.displayName || 'Game';
-                addLog(`No live streamers found for ${gameName}.`, 'warn');
-                showToast(`No live streamers found for ${gameName}`, 'warn');
-                if (farmStatus) farmStatus.innerText = 'No live streamers found.';
-                if (btnRunFarm) btnRunFarm.style.display = 'flex';
-                if (btnStopFarm) btnStopFarm.style.display = 'none';
-
-                if (!manualOverrideId) {
-                    stallBlacklist[campaign.id] = Date.now() + 30 * 60 * 1000;
-                    delete campaignFailedStreamerCounts[campaign.id];
-
-                    setTimeout(() => {
-                        cycleCampaign(1, true);
-                    }, 600);
-                }
-                return;
-            }
+            targetStreamerNode = availableStreams[0].node;
         }
 
         const targetStreamer = targetStreamerNode.broadcaster;
@@ -3692,7 +3645,10 @@ function startFarmingSimulation(campaign, autoStart = false, updateOnly = false,
     const heroCard = getEl('heroMonitorCard');
     if (!targetPanel) return;
 
+    const dropsContainer = getEl('currentFarmDropsContainer');
     const drops = (campaign.timeBasedDrops || []).slice().sort((a, b) => a.requiredMinutesWatched - b.requiredMinutesWatched);
+    if (dropsContainer && drops.length > 0) dropsContainer.style.display = 'block';
+    if (dropsContainer && drops.length === 0) dropsContainer.style.display = 'none';
     const isFarmingThis = (activeFarmingCampaignId === campaign.id);
     let currentlyFoundUnfinished = false;
     let activeDropNameForUI = '';
