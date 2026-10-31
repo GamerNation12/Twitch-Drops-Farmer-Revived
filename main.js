@@ -489,7 +489,7 @@ ipcMain.handle('check-for-updates', async () => {
       headers: {
         'User-Agent': 'Twitch-Drops-Farmer-Revived',
         'Accept': 'application/vnd.github+json',
-        'Authorization': `token ${GITHUB_TOKEN}`
+        ...(GITHUB_TOKEN ? { 'Authorization': `token ${GITHUB_TOKEN}` } : {})
       }
     });
 
@@ -584,7 +584,7 @@ ipcMain.handle('download-update', async (event, opts = {}) => {
       redirect: 'follow',
       headers: {
         'User-Agent': 'Twitch-Drops-Farmer-Revived',
-        'Authorization': `token ${GITHUB_TOKEN}`
+        ...(GITHUB_TOKEN ? { 'Authorization': `token ${GITHUB_TOKEN}` } : {})
       }
     });
     if (!res.ok || !res.body) throw new Error(`Download failed (HTTP ${res.status}).`);
