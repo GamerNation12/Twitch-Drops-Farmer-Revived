@@ -1923,6 +1923,8 @@ let preCheckTimer = null;
 let campaignBlacklist = {};
 let campaignIdBeingStarted = null;
 let pendingClaims = new Set();
+let isFarmingLoopBusy = false;
+let currentGlobalDropSession = null;
 
 // Sidebar Dock Master Farm UI Synchronizer
 function updateMasterAutoFarmUI() {
