@@ -1925,6 +1925,8 @@ let campaignIdBeingStarted = null;
 let pendingClaims = new Set();
 let isFarmingLoopBusy = false;
 let currentGlobalDropSession = null;
+let liveFarmMinutes = 0;
+let liveFarmLastProgressTime = null;
 
 // Sidebar Dock Master Farm UI Synchronizer
 function updateMasterAutoFarmUI() {
@@ -1976,6 +1978,60 @@ function updateMasterAutoFarmUI() {
             btnFarmAll.innerHTML = isFetchingCampaigns ? `${ICONS.spinner(12)} Loading...` : `${ICONS.zap(12)} Farm All Available`;
             btnFarmAll.style.background = isFetchingCampaigns ? '#333' : 'linear-gradient(135deg, #10b981, #059669)';
         }
+    }
+}
+
+function renderLiveFarmProgress() {
+    const container = document.getElementById('liveFarmProgress');
+    const streamerEl = document.getElementById('liveFarmStreamer');
+    const gameEl = document.getElementById('liveFarmGame');
+    const minutesEl = document.getElementById('liveFarmMinutes');
+    const lastEl = document.getElementById('liveFarmLastProgress');
+    const fillEl = document.getElementById('liveFarmProgressFill');
+
+    const isFarming = activeFarmingCampaignId && currentFarmingChannelId;
+
+    if (!container) return;
+
+    if (!isFarming) {
+        container.style.display = 'none';
+        liveFarmMinutes = 0;
+        liveFarmLastProgressTime = null;
+        return;
+    }
+
+    container.style.display = 'block';
+
+    if (streamerEl && activeFarmingChannelLogin) streamerEl.innerText = `@${activeFarmingChannelLogin}`;
+    if (gameEl) {
+        const camp = allCampaigns.find(c => c.id === activeFarmingCampaignId);
+        gameEl.innerText = camp ? `— ${camp.game?.displayName || 'Game'}` : '— Game';
+    }
+
+    const currentDrop = allCampaigns.find(c => c.id === activeFarmingCampaignId)?.timeBasedDrops?.find(d => d.self && !d.self.isClaimed);
+    const currentMins = currentDrop?.self?.currentMinutesWatched || liveFarmMinutes;
+    if (currentDrop && currentMins > liveFarmMinutes) {
+        liveFarmMinutes = currentMins;
+        liveFarmLastProgressTime = Date.now();
+    }
+
+    if (minutesEl) minutesEl.innerText = `${liveFarmMinutes}m watched`;
+
+    if (lastEl) {
+        if (!liveFarmLastProgressTime) {
+            lastEl.innerText = 'just started';
+        } else {
+            const minsAgo = Math.floor((Date.now() - liveFarmLastProgressTime) / 60000);
+            lastEl.innerText = minsAgo === 0 ? 'progress just now' : `${minsAgo}m ago`;
+        }
+    }
+
+    if (fillEl && currentDrop) {
+        const required = currentDrop.requiredMinutesWatched || 1;
+        const pct = Math.min(100, Math.floor((currentMins / required) * 100));
+        fillEl.style.width = `${pct}%`;
+    } else if (fillEl) {
+        fillEl.style.width = '0%';
     }
 }
 
@@ -2294,6 +2350,7 @@ async function runMasterFarmLoop() {
                 }
                 progressionTracker[curr.id] = { mins: currentMins, time: now, lastDropName: dropName };
                 campaignFailedStreamerCounts[curr.id] = 0;
+                renderLiveFarmProgress();
             } else {
                 const threshold = stallThresholdSec * 1000;
                 const elapsed = now - stats.time;
@@ -3426,6 +3483,8 @@ function haltCurrentFarmWorker() {
 
     const stallStatus = document.getElementById('stallStatus');
     if (stallStatus) stallStatus.innerHTML = '';
+
+    renderLiveFarmProgress();
 }
 
 function stopFarmAction(campaign) {
@@ -3578,6 +3637,7 @@ async function startFarmAction(campaign, isAuto = false) {
 
         progressionTracker[campaign.id] = { mins: -1, time: Date.now() };
 
+        renderLiveFarmProgress();
         updateHeaderFarmWidget();
         renderIdlePlaceholder();
         setTimeout(fetchAndUpdateCampaigns, 3000);
