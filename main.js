@@ -463,7 +463,7 @@ ipcMain.handle('poll-device-token', async (event, deviceCode) => {
 // GitHub API requires a User-Agent header, which the renderer cannot set.
 // ============================================================
 const UPDATE_REPO = 'GamerNation12/Twitch-Drops-Farmer-Revived';
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || null;
+const GITHUB_TOKEN = process.env.DF_GITHUB_TOKEN || null;
 
 function semverParts(v) {
   return String(v || '').replace(/^v/i, '').split(/[.\-+]/).map((n) => parseInt(n, 10) || 0);
