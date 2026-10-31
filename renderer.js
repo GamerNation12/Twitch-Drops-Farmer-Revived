@@ -61,6 +61,16 @@ function decodeGameParam(str) {
     }
 }
 
+function formatTime(minutes) {
+    if (!minutes && minutes !== 0) return '00:00:00';
+    const totalSeconds = Math.floor(Number(minutes) * 60);
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    if (h > 0) return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
 function escapeHtml(str) {
     if (!str) return '';
     return String(str)
@@ -2015,14 +2025,18 @@ function renderLiveFarmProgress() {
         liveFarmLastProgressTime = Date.now();
     }
 
-    if (minutesEl) minutesEl.innerText = `${liveFarmMinutes}m watched`;
+    if (minutesEl) minutesEl.innerText = `${formatTime(liveFarmMinutes)} watched`;
 
     if (lastEl) {
         if (!liveFarmLastProgressTime) {
             lastEl.innerText = 'just started';
         } else {
-            const minsAgo = Math.floor((Date.now() - liveFarmLastProgressTime) / 60000);
-            lastEl.innerText = minsAgo === 0 ? 'progress just now' : `${minsAgo}m ago`;
+            const secsAgo = Math.floor((Date.now() - liveFarmLastProgressTime) / 1000);
+            if (secsAgo < 60) lastEl.innerText = `${secsAgo}s ago`;
+            else {
+                const minsAgo = Math.floor(secsAgo / 60);
+                lastEl.innerText = minsAgo === 1 ? '1m ago' : `${minsAgo}m ago`;
+            }
         }
     }
 
@@ -3703,15 +3717,6 @@ function startFarmingSimulation(campaign, autoStart = false, updateOnly = false,
         let currentMins = selfStats.currentMinutesWatched || 0;
         let isClaimed = selfStats.isClaimed || false;
 
-        if (currentGlobalDropSession && (currentGlobalDropSession.game?.id === campaign.game?.id || currentGlobalDropSession.game?.displayName === campaign.game?.displayName)) {
-            if (!isClaimed && currentGlobalDropSession.requiredMinutesWatched === requiredMins) {
-                if (currentGlobalDropSession.currentMinutesWatched !== undefined && currentGlobalDropSession.currentMinutesWatched !== null) {
-                    currentMins = currentGlobalDropSession.currentMinutesWatched;
-                }
-            }
-        }
-
-        if (currentMins > requiredMins) currentMins = requiredMins;
         if (isClaimed) currentMins = requiredMins;
         let percent = requiredMins > 0 ? Math.floor((currentMins / requiredMins) * 100) : 0;
         
@@ -3782,7 +3787,7 @@ function startFarmingSimulation(campaign, autoStart = false, updateOnly = false,
                 // In-place update existing DOM elements! Smooth width transition & continuous keyframe animation
                 const metaEl = heroCard.querySelector('.hero-streamer-meta');
                 if (metaEl) {
-                    const newMetaHtml = `<span>Farming: <b>${activeDropNameForUI || 'Drop Reward'}</b></span><span>· ${activePercent}% (${activeCurrentMins}m / ${activeReqMins}m)</span>`;
+                    const newMetaHtml = `<span>Farming: <b>${activeDropNameForUI || 'Drop Reward'}</b></span><span>· ${activePercent}% (${formatTime(activeCurrentMins)} / ${formatTime(activeReqMins)})</span>`;
                     if (metaEl.innerHTML !== newMetaHtml) metaEl.innerHTML = newMetaHtml;
                 }
                 const heroBar = heroCard.querySelector('.progress-bar');
@@ -3934,7 +3939,7 @@ function startFarmingSimulation(campaign, autoStart = false, updateOnly = false,
                         } else if (percent === 100) {
                             statusHtml = `<span style="color: var(--warning); display:inline-flex; align-items:center; gap:3px;">${ICONS.gift(12)} Ready to claim</span>`;
                         } else {
-                            statusHtml = `<span style="color: var(--text-secondary);">${percent}% · ${currentMins}m / ${requiredMins}m</span>`;
+            statusHtml = `<span style="color: var(--text-secondary);">${percent}% · ${formatTime(currentMins)} / ${formatTime(requiredMins)}</span>`;
                         }
                         if (statusEl.innerHTML !== statusHtml) statusEl.innerHTML = statusHtml;
                     }
