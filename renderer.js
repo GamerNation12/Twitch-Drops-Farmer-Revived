@@ -709,6 +709,8 @@ let previewCampaignId = null;
 let activeFarmingChannelLogin = null;
 let masterAutoFarmEnabled = false;
 let tokenProcessingStarted = false;
+let isFetchingCampaigns = false;
+let currentFarmingChannelId = null;
 
 async function openStreamerSelector() {
     const campaign = allCampaigns.find(c => c.id === activeFarmingCampaignId);
@@ -1921,7 +1923,6 @@ let preCheckTimer = null;
 let campaignBlacklist = {};
 let campaignIdBeingStarted = null;
 let pendingClaims = new Set();
-let isFetchingCampaigns = false;
 
 // Sidebar Dock Master Farm UI Synchronizer
 function updateMasterAutoFarmUI() {
@@ -2254,10 +2255,16 @@ async function cycleCampaign(direction, autoStart = false) {
 
 async function runMasterFarmLoop() {
     if (isFarmingLoopBusy) return;
-    if (!masterAutoFarmEnabled && !activeFarmingCampaignId) return;
+    if (!masterAutoFarmEnabled && !activeFarmingCampaignId) {
+        isFarmingLoopBusy = false;
+        return;
+    }
 
     if (!allCampaigns || allCampaigns.length === 0) {
-        if (!isFetchingCampaigns) fetchAndUpdateCampaigns();
+        if (!isFetchingCampaigns && typeof fetchAndUpdateCampaigns === 'function') {
+            fetchAndUpdateCampaigns();
+        }
+        isFarmingLoopBusy = false;
         return;
     }
 
@@ -2593,13 +2600,17 @@ async function fetchAndUpdateCampaigns() {
         }
 
         if (currentFarmingChannelId) {
-            const dropRes = await window.electronAPI.getDropSession(currentFarmingChannelId, accountTokens);
-            if (dropRes) {
-                if (Array.isArray(dropRes) && dropRes.length > 0) {
-                    currentGlobalDropSession = dropRes[0]?.data?.currentUser?.dropCurrentSession || null;
-                } else {
-                    currentGlobalDropSession = dropRes?.data?.currentUser?.dropCurrentSession || null;
+            try {
+                const dropRes = await window.electronAPI.getDropSession(currentFarmingChannelId, accountTokens);
+                if (dropRes) {
+                    if (Array.isArray(dropRes) && dropRes.length > 0) {
+                        currentGlobalDropSession = dropRes[0]?.data?.currentUser?.dropCurrentSession || null;
+                    } else {
+                        currentGlobalDropSession = dropRes?.data?.currentUser?.dropCurrentSession || null;
+                    }
                 }
+            } catch (e) {
+                console.error('Failed to get drop session:', e);
             }
         }
 
