@@ -463,6 +463,7 @@ ipcMain.handle('poll-device-token', async (event, deviceCode) => {
 // GitHub API requires a User-Agent header, which the renderer cannot set.
 // ============================================================
 const UPDATE_REPO = 'GamerNation12/Twitch-Drops-Farmer-Revived';
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || null;
 
 function semverParts(v) {
   return String(v || '').replace(/^v/i, '').split(/[.\-+]/).map((n) => parseInt(n, 10) || 0);
@@ -487,7 +488,8 @@ ipcMain.handle('check-for-updates', async () => {
     const res = await fetch(`https://api.github.com/repos/${UPDATE_REPO}/releases/latest`, {
       headers: {
         'User-Agent': 'Twitch-Drops-Farmer-Revived',
-        'Accept': 'application/vnd.github+json'
+        'Accept': 'application/vnd.github+json',
+        'Authorization': `token ${GITHUB_TOKEN}`
       }
     });
 
@@ -580,7 +582,10 @@ ipcMain.handle('download-update', async (event, opts = {}) => {
 
     const res = await fetch(url, {
       redirect: 'follow',
-      headers: { 'User-Agent': 'Twitch-Drops-Farmer-Revived' }
+      headers: {
+        'User-Agent': 'Twitch-Drops-Farmer-Revived',
+        'Authorization': `token ${GITHUB_TOKEN}`
+      }
     });
     if (!res.ok || !res.body) throw new Error(`Download failed (HTTP ${res.status}).`);
 
