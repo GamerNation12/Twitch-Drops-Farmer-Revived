@@ -3473,6 +3473,10 @@ async function startFarmAction(campaign, isAuto = false) {
     if (farmStatus) farmStatus.innerHTML = `<span style="color: var(--text-secondary); display:inline-flex; align-items:center; gap:4px;">${ICONS.search(12)} Searching for streamer...</span>`;
 
     try {
+        if (!accountTokens) {
+            throw new Error('No Twitch account logged in. Please log in first.');
+        }
+
         let whitelistedLogins = null;
         if (campaign.allow?.isEnabled && campaign.allow?.channels && campaign.allow.channels.length > 0) {
             whitelistedLogins = campaign.allow.channels.map(ch => ch.name);
@@ -3515,6 +3519,7 @@ async function startFarmAction(campaign, isAuto = false) {
             // Game search mode: find live streams for the campaign's game
             const res = await window.electronAPI.findStreamer(campaign.game?.displayName || '', accountTokens, whitelistedLogins);
             if (campaignIdBeingStarted !== campaign.id) return;
+            if (res?.error) throw new Error(res.error);
             streams = res?.data?.game?.streams?.edges || [];
         }
 
@@ -3550,42 +3555,8 @@ async function startFarmAction(campaign, isAuto = false) {
             return;
         }
 
-        // Pick first available streamer; optional GQL pre-check with fallback
-        let targetStreamerNode = null;
-        const targetGameId = campaign.game?.id;
-        const targetGameName = (campaign.game?.displayName || '').toLowerCase();
-
-        for (const candidate of availableStreams.slice(0, 3)) {
-            const streamerId = candidate.node?.broadcaster?.id;
-            const login = candidate.node?.broadcaster?.login;
-            if (!streamerId || !login) continue;
-
-            try {
-                const dropCheck = await window.electronAPI.checkChannelDrops(streamerId, accountTokens).catch(() => null);
-                const activeCampaignsOnChannel = dropCheck?.data?.channelDropCampaignsProgress || [];
-                const isConfirmed = whitelistedLogins?.length > 0 || (activeCampaignsOnChannel.length > 0 && activeCampaignsOnChannel.some(dc =>
-                    (dc.game?.id && String(dc.game.id) === String(targetGameId)) ||
-                    (dc.game?.name && dc.game.name.toLowerCase() === targetGameName) ||
-                    (dc.name && dc.name.toLowerCase().includes(targetGameName)) ||
-                    dc.id === campaign.id
-                ));
-
-                if (isConfirmed || !dropCheck) {
-                    targetStreamerNode = candidate.node;
-                    break;
-                } else {
-                    sessionSkippedStreamers.add(login.toLowerCase());
-                }
-            } catch (err) {
-                targetStreamerNode = candidate.node;
-                break;
-            }
-        }
-
-        if (!targetStreamerNode) {
-            targetStreamerNode = availableStreams[0].node;
-        }
-
+        // Pick first available streamer immediately — no extra GQL pre-checks that can fail
+        const targetStreamerNode = availableStreams[0].node;
         const targetStreamer = targetStreamerNode.broadcaster;
         const streamerLogin = targetStreamer.login;
         const streamerId = targetStreamer.id;
