@@ -820,6 +820,8 @@ window.selectStreamerAndFarm = async (campaignId, idx) => {
     
     updateHeaderFarmWidget();
     renderIdlePlaceholder();
+    renderLiveFarmProgress();
+    startLiveFarmInterval();
     setTimeout(fetchAndUpdateCampaigns, 3000);
 };
 
@@ -1937,6 +1939,7 @@ let isFarmingLoopBusy = false;
 let currentGlobalDropSession = null;
 let liveFarmMinutes = 0;
 let liveFarmLastProgressTime = null;
+let liveFarmInterval = null;
 
 // Sidebar Dock Master Farm UI Synchronizer
 function updateMasterAutoFarmUI() {
@@ -2050,6 +2053,24 @@ function renderLiveFarmProgress() {
         fillEl.style.width = `${pct}%`;
     } else if (fillEl) {
         fillEl.style.width = '0%';
+    }
+}
+
+function startLiveFarmInterval() {
+    if (liveFarmInterval) clearInterval(liveFarmInterval);
+    liveFarmInterval = setInterval(() => {
+        if (activeFarmingCampaignId && currentFarmingChannelId) {
+            renderLiveFarmProgress();
+        } else {
+            stopLiveFarmInterval();
+        }
+    }, 1000);
+}
+
+function stopLiveFarmInterval() {
+    if (liveFarmInterval) {
+        clearInterval(liveFarmInterval);
+        liveFarmInterval = null;
     }
 }
 
@@ -3503,6 +3524,7 @@ function haltCurrentFarmWorker() {
     if (stallStatus) stallStatus.innerHTML = '';
 
     renderLiveFarmProgress();
+    stopLiveFarmInterval();
 }
 
 function stopFarmAction(campaign) {
@@ -3656,6 +3678,7 @@ async function startFarmAction(campaign, isAuto = false) {
         progressionTracker[campaign.id] = { mins: -1, time: Date.now() };
 
         renderLiveFarmProgress();
+        startLiveFarmInterval();
         updateHeaderFarmWidget();
         renderIdlePlaceholder();
         setTimeout(fetchAndUpdateCampaigns, 3000);
@@ -3751,7 +3774,7 @@ function startFarmingSimulation(campaign, autoStart = false, updateOnly = false,
             containerClass += ' is-claimable';
             fillClass += ' progress-claimable-active';
         } else {
-            statusHtml = `<span style="color: var(--text-secondary);">${percent}% · ${currentMins}m / ${requiredMins}m</span>`;
+            statusHtml = `<span style="color: var(--text-secondary);">${percent}% · ${formatTime(Math.max(0, requiredMins - currentMins))} left</span>`;
             if (isFarmingThis) {
                 if (isActiveDrop) {
                     containerClass += ' is-farming';
@@ -3814,7 +3837,7 @@ function startFarmingSimulation(campaign, autoStart = false, updateOnly = false,
                                 <div class="hero-game-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Watching <span class="streamer-link" title="Open twitch.tv/${activeFarmingChannelLogin} in browser" onclick="event.stopPropagation(); window.electronAPI.openExternal('https://www.twitch.tv/${activeFarmingChannelLogin}')">@${activeFarmingChannelLogin}</span></div>
                                 <div class="hero-streamer-meta">
                                     <span>Farming: <b>${activeDropNameForUI || 'Drop Reward'}</b></span>
-                                    <span>· ${activePercent}% (${activeCurrentMins}m / ${activeReqMins}m)</span>
+                                    <span>· ${activePercent}% · ${formatTime((activeReqMins - activeCurrentMins))} left</span>
                                 </div>
                             </div>
                             <div class="hero-actions" style="display: flex; gap: 8px; align-items: center; flex-shrink: 0; margin-top: 2px;">
