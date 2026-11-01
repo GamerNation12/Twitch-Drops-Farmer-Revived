@@ -2020,12 +2020,16 @@ function renderLiveFarmProgress() {
 
     const currentDrop = allCampaigns.find(c => c.id === activeFarmingCampaignId)?.timeBasedDrops?.find(d => d.self && !d.self.isClaimed);
     const currentMins = currentDrop?.self?.currentMinutesWatched || liveFarmMinutes;
+    const requiredMins = currentDrop?.requiredMinutesWatched || 0;
     if (currentDrop && currentMins > liveFarmMinutes) {
         liveFarmMinutes = currentMins;
         liveFarmLastProgressTime = Date.now();
     }
 
-    if (minutesEl) minutesEl.innerText = `${formatTime(liveFarmMinutes)} watched`;
+    if (minutesEl) {
+        const remaining = Math.max(0, requiredMins - currentMins);
+        minutesEl.innerText = `${formatTime(remaining)} left`;
+    }
 
     if (lastEl) {
         if (!liveFarmLastProgressTime) {
@@ -3787,7 +3791,8 @@ function startFarmingSimulation(campaign, autoStart = false, updateOnly = false,
                 // In-place update existing DOM elements! Smooth width transition & continuous keyframe animation
                 const metaEl = heroCard.querySelector('.hero-streamer-meta');
                 if (metaEl) {
-                    const newMetaHtml = `<span>Farming: <b>${activeDropNameForUI || 'Drop Reward'}</b></span><span>· ${activePercent}% (${formatTime(activeCurrentMins)} / ${formatTime(activeReqMins)})</span>`;
+                    const remainingSeconds = Math.max(0, Math.floor((activeReqMins - activeCurrentMins) * 60));
+                    const newMetaHtml = `<span>Farming: <b>${activeDropNameForUI || 'Drop Reward'}</b></span><span>· ${activePercent}% · ${formatTime((activeReqMins - activeCurrentMins))} left</span>`;
                     if (metaEl.innerHTML !== newMetaHtml) metaEl.innerHTML = newMetaHtml;
                 }
                 const heroBar = heroCard.querySelector('.progress-bar');
@@ -3814,6 +3819,7 @@ function startFarmingSimulation(campaign, autoStart = false, updateOnly = false,
                             </div>
                             <div class="hero-actions" style="display: flex; gap: 8px; align-items: center; flex-shrink: 0; margin-top: 2px;">
                                 <button class="btn-danger" onclick="stopFarmAction()" title="Stop Farm" style="width: auto; padding: 7px 16px; font-size: 12.5px;">Stop</button>
+                                <button class="btn-secondary" onclick="openStreamerSelector()" title="Change Streamer" style="width: auto; padding: 7px 14px; font-size: 12.5px; display: inline-flex; align-items: center; gap: 4px;">Change Streamer ${ICONS.skip(12)}</button>
                                 <button class="btn-secondary" onclick="skipCampaignAction()" title="Skip Campaign" style="width: auto; padding: 7px 14px; font-size: 12.5px; display: inline-flex; align-items: center; gap: 4px;">Skip ${ICONS.skip(12)}</button>
                             </div>
                         </div>
