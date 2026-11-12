@@ -686,6 +686,8 @@ function switchView(viewName) {
     }
 }
 
+window.switchView = switchView;
+
 if (btnNavDashboard) btnNavDashboard.onclick = () => switchView('dashboard');
 if (btnNavCampaigns) btnNavCampaigns.onclick = () => switchView('campaigns');
 if (btnNavInventory) btnNavInventory.onclick = () => switchView('inventory');
@@ -765,6 +767,8 @@ function closeMobileMenu() {
     if (mobileNavOverlay) mobileNavOverlay.classList.remove('mobile-open');
 }
 
+window.closeMobileMenu = closeMobileMenu;
+
 if (btnMobileMenu) {
     btnMobileMenu.onclick = () => {
         if (mobileNavOverlay) mobileNavOverlay.classList.toggle('mobile-open');
@@ -814,6 +818,7 @@ if (accountTokens && accountTokens.clientId !== WEB_CLIENT_ID) {
     accountTokens.clientId = WEB_CLIENT_ID;
     syncAccountTokens(accountTokens);
 }
+renderAccountSelector();
 let allCampaigns = [];
 let filteredCampaigns = [];
 
@@ -919,6 +924,10 @@ async function removeAccount(accountId) {
     renderAccountSelector();
     return true;
 }
+
+window.switchAccount = switchAccount;
+window.removeAccount = removeAccount;
+
 let autoClaimEnabled = localStorage.getItem('autoClaimEnabled') !== 'false';
 let discordRPCEnabled = localStorage.getItem('discordRPCEnabled') === 'true';
 let rpcFarmingStartTimestamp = null;
