@@ -678,6 +678,7 @@ function switchView(viewName) {
             renderPriorityChips();
             renderPriorityGrid(autoFarmSearch ? autoFarmSearch.value : '');
             scheduleGameSearch(autoFarmSearch ? autoFarmSearch.value : '');
+            renderSettingsAccounts();
         }
         if (viewName === 'logs' && viewLogs) { viewLogs.style.display = 'block'; btnNavLogs.classList.add('active'); }
     } catch (e) {
@@ -691,7 +692,116 @@ if (btnNavInventory) btnNavInventory.onclick = () => switchView('inventory');
 if (btnNavSettings) btnNavSettings.onclick = () => switchView('settings');
 if (btnNavLogs) btnNavLogs.onclick = () => switchView('logs');
 
-let accountTokens = JSON.parse(localStorage.getItem('accountTokens') || 'null');
+// Account dropdown toggle
+const btnAccountDropdown = getEl('btnAccountDropdown');
+const accountDropdownMenu = getEl('accountDropdownMenu');
+if (btnAccountDropdown) {
+    btnAccountDropdown.onclick = (e) => {
+        e.stopPropagation();
+        toggleAccountDropdown();
+    };
+}
+document.addEventListener('click', (e) => {
+    if (accountDropdownMenu && !accountDropdownMenu.contains(e.target) && !btnAccountDropdown?.contains(e.target)) {
+        accountDropdownMenu.style.display = 'none';
+    }
+});
+
+const btnAddAccount = getEl('btnAddAccount');
+if (btnAddAccount) {
+    btnAddAccount.onclick = async (e) => {
+        e.stopPropagation();
+        accountDropdownMenu.style.display = 'none';
+        try {
+            const deviceRes = await window.electronAPI.requestDeviceCode();
+            if (deviceRes.error) {
+                showToast('Failed to get device code: ' + deviceRes.error, 'error');
+                return;
+            }
+            showToast('Device code ready. Check console for user code and verification URL.', 'info');
+            console.log('[Device Auth]', deviceRes);
+            // Poll for token
+            const maxAttempts = 60;
+            let attempts = 0;
+            const pollInterval = setInterval(async () => {
+                attempts++;
+                const tokenRes = await window.electronAPI.pollDeviceToken(deviceRes.device_code);
+                if (tokenRes.error) {
+                    if (tokenRes.error.includes('authorization_pending')) {
+                        if (attempts >= maxAttempts) {
+                            clearInterval(pollInterval);
+                            showToast('Device code expired.', 'warn');
+                        }
+                        return;
+                    }
+                    clearInterval(pollInterval);
+                    showToast('Auth error: ' + tokenRes.error, 'error');
+                    return;
+                }
+                clearInterval(pollInterval);
+                const addRes = await window.electronAPI.addAccountFromDeviceCode(deviceRes.device_code);
+                if (addRes.error) {
+                    showToast('Failed to add account: ' + addRes.error, 'error');
+                } else {
+                    showToast('Account added: ' + addRes.account.login, 'success');
+                    renderAccountSelector();
+                    if (addRes.account.isActive) {
+                        await switchAccount(addRes.account.id);
+                    }
+                }
+            }, 3000);
+        } catch (e) {
+            showToast('Auth failed: ' + e.message, 'error');
+        }
+    };
+}
+
+// Mobile menu toggle
+const btnMobileMenu = getEl('btnMobileMenu');
+const mobileNavOverlay = getEl('mobileNavOverlay');
+const btnMobileLogout = getEl('btnMobileLogout');
+
+function closeMobileMenu() {
+    if (mobileNavOverlay) mobileNavOverlay.classList.remove('mobile-open');
+}
+
+if (btnMobileMenu) {
+    btnMobileMenu.onclick = () => {
+        if (mobileNavOverlay) mobileNavOverlay.classList.toggle('mobile-open');
+    };
+}
+
+if (mobileNavOverlay) {
+    mobileNavOverlay.onclick = (e) => {
+        if (e.target === mobileNavOverlay) closeMobileMenu();
+    };
+}
+
+if (btnMobileLogout) {
+    btnMobileLogout.onclick = async () => {
+        closeMobileMenu();
+        if (activeAccountId) {
+            await removeAccount(activeAccountId);
+        }
+        location.reload();
+    };
+}
+
+let savedAccounts = JSON.parse(localStorage.getItem('savedAccounts') || '[]');
+let activeAccountId = localStorage.getItem('activeAccountId') || null;
+let accountTokens = null;
+
+const activeAccount = savedAccounts.find(a => a.id === activeAccountId) || savedAccounts.find(a => a.isActive) || savedAccounts[0] || null;
+if (activeAccount) {
+    activeAccountId = activeAccount.id;
+    localStorage.setItem('activeAccountId', activeAccountId);
+    accountTokens = {
+        auth: activeAccount.auth,
+        integrity: activeAccount.integrity,
+        clientId: activeAccount.clientId,
+        deviceId: activeAccount.deviceId
+    };
+}
 
 // LOCAL PATCH: the GQL client id must always be the *web* client id, because
 // every query this app sends is a web-client query. An earlier build of this
@@ -702,10 +812,113 @@ const WEB_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
 if (accountTokens && accountTokens.clientId !== WEB_CLIENT_ID) {
     console.warn(`[GQL] Replacing stored client id ${accountTokens.clientId} with the web client id`);
     accountTokens.clientId = WEB_CLIENT_ID;
-    localStorage.setItem('accountTokens', JSON.stringify(accountTokens));
+    syncAccountTokens(accountTokens);
 }
 let allCampaigns = [];
 let filteredCampaigns = [];
+
+function syncAccountTokens(tokens) {
+    // Update the active account in savedAccounts
+    if (!activeAccountId) return;
+    const acc = savedAccounts.find(a => a.id === activeAccountId);
+    if (acc) {
+        if (tokens.auth !== undefined) acc.auth = tokens.auth;
+        if (tokens.integrity !== undefined) acc.integrity = tokens.integrity;
+        if (tokens.clientId !== undefined) acc.clientId = tokens.clientId;
+        if (tokens.deviceId !== undefined) acc.deviceId = tokens.deviceId;
+        localStorage.setItem('savedAccounts', JSON.stringify(savedAccounts));
+    }
+    accountTokens = {
+        auth: tokens.auth,
+        integrity: tokens.integrity,
+        clientId: tokens.clientId,
+        deviceId: tokens.deviceId
+    };
+}
+
+async function switchAccount(accountId) {
+    const acc = savedAccounts.find(a => a.id === accountId);
+    if (!acc) return false;
+
+    // Stop current farm
+    haltCurrentFarmWorker();
+
+    // Update active account
+    activeAccountId = accountId;
+    localStorage.setItem('activeAccountId', activeAccountId);
+    savedAccounts.forEach(a => { a.isActive = (a.id === accountId); });
+    localStorage.setItem('savedAccounts', JSON.stringify(savedAccounts));
+
+    // Set accountTokens to new account's tokens
+    accountTokens = {
+        auth: acc.auth,
+        integrity: acc.integrity,
+        clientId: acc.clientId,
+        deviceId: acc.deviceId
+    };
+
+    // Clear state
+    allCampaigns = [];
+    filteredCampaigns = [];
+    activeFarmingCampaignId = null;
+    currentFarmingChannelId = null;
+    activeFarmingChannelLogin = null;
+    renderCampaignsListItems();
+    renderIdlePlaceholder();
+    updateHeaderFarmWidget();
+
+    // Reconnect WebSocket with new account
+    if (acc.auth && acc.auth.includes('OAuth')) {
+        try {
+            const userRes = await window.electronAPI.getUserInfo(accountTokens);
+            const user = userRes?.data?.currentUser;
+            if (user) {
+                currentUserId = user.id;
+                await window.electronAPI.wsConnect(currentUserId, accountTokens.auth);
+                addLog(`⚡ WebSocket reconnected for ${acc.displayName || acc.login}`, 'system');
+            }
+        } catch (e) {
+            console.error('WebSocket reconnect failed:', e);
+        }
+        processTokens(accountTokens);
+    }
+
+    addLog(`Switched to account: ${acc.displayName || acc.login}`, 'system');
+    showToast(`Switched to ${acc.displayName || acc.login}`, 'success');
+    renderAccountSelector();
+    return true;
+}
+
+async function removeAccount(accountId) {
+    const acc = savedAccounts.find(a => a.id === accountId);
+    if (!acc) return false;
+
+    const wasActive = (accountId === activeAccountId);
+    savedAccounts = savedAccounts.filter(a => a.id !== accountId);
+    localStorage.setItem('savedAccounts', JSON.stringify(savedAccounts));
+
+    if (wasActive) {
+        if (savedAccounts.length > 0) {
+            await switchAccount(savedAccounts[0].id);
+        } else {
+            activeAccountId = null;
+            localStorage.removeItem('activeAccountId');
+            accountTokens = null;
+            allCampaigns = [];
+            filteredCampaigns = [];
+            activeFarmingCampaignId = null;
+            currentFarmingChannelId = null;
+            activeFarmingChannelLogin = null;
+            renderCampaignsListItems();
+            renderIdlePlaceholder();
+            updateHeaderFarmWidget();
+            renderAccountSelector();
+            addLog('Removed last account. Please log in again.', 'warn');
+        }
+    }
+    renderAccountSelector();
+    return true;
+}
 let autoClaimEnabled = localStorage.getItem('autoClaimEnabled') !== 'false';
 let discordRPCEnabled = localStorage.getItem('discordRPCEnabled') === 'true';
 let rpcFarmingStartTimestamp = null;
@@ -1994,7 +2207,73 @@ function updateMasterAutoFarmUI() {
     }
 }
 
+function renderAccountSelector() {
+    const accountSelector = getEl('accountSelector');
+    const loginBtn = getEl('loginBtn');
+    const dropdownName = getEl('accountDropdownName');
+    const accountList = getEl('accountList');
+
+    if (accountTokens && accountTokens.auth) {
+        if (accountSelector) accountSelector.style.display = 'block';
+        if (loginBtn) loginBtn.style.display = 'none';
+        if (dropdownName) {
+            const activeAcc = savedAccounts.find(a => a.id === activeAccountId);
+            dropdownName.innerText = activeAcc ? (activeAcc.displayName || activeAcc.login) : 'Account';
+        }
+        if (accountList) {
+            accountList.innerHTML = savedAccounts.map(acc => {
+                const isActive = acc.id === activeAccountId;
+                return `
+                <div style="display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 6px; ${isActive ? 'background: rgba(145,70,255,0.15); border: 1px solid var(--accent-color);' : ''} cursor: pointer; margin-bottom: 4px;" onclick="switchAccount('${acc.id}'); event.stopPropagation();">
+                    ${acc.avatarUrl ? `<img src="${acc.avatarUrl}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" />` : '<div style="width: 24px; height: 24px; border-radius: 50%; background: var(--bg-secondary);"></div>'}
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(acc.displayName || acc.login)}</div>
+                        <div style="font-size: 10px; color: var(--text-secondary);">@${escapeHtml(acc.login)}</div>
+                    </div>
+                    ${isActive ? '<span style="color: var(--accent-color); font-size: 10px;">● Active</span>' : ''}
+                    ${savedAccounts.length > 1 ? `<button onclick="removeAccount('${acc.id}'); event.stopPropagation();" style="padding: 4px; background: none; border: none; color: var(--danger); cursor: pointer; opacity: 0.6;" title="Remove account">${ICONS.ban(10)}</button>` : ''}
+                </div>`;
+            }).join('');
+        }
+    } else {
+        if (accountSelector) accountSelector.style.display = 'none';
+        if (loginBtn) loginBtn.style.display = 'block';
+    }
+}
+
+function toggleAccountDropdown() {
+    const menu = getEl('accountDropdownMenu');
+    if (menu) menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+}
+
+function renderSettingsAccounts() {
+    const list = getEl('settingsAccountsList');
+    if (!list) return;
+    list.innerHTML = savedAccounts.map(acc => {
+        const isActive = acc.id === activeAccountId;
+        return `
+        <div style="display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: ${isActive ? 'rgba(145,70,255,0.15)' : 'var(--bg-secondary)'}; border: 1px solid ${isActive ? 'var(--accent-color)' : 'var(--border-color)'}; border-radius: 8px; margin-bottom: 4px;">
+            ${acc.avatarUrl ? `<img src="${acc.avatarUrl}" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover;" />` : '<div style="width: 32px; height: 32px; border-radius: 50%; background: var(--bg-tertiary);"></div>'}
+            <div style="flex: 1; min-width: 0;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(acc.displayName || acc.login)}</div>
+                    ${isActive ? '<span style="color: var(--accent-color); font-size: 11px; font-weight: 700;">● Active</span>' : ''}
+                </div>
+                <div style="font-size: 11px; color: var(--text-secondary);">@${escapeHtml(acc.login)} • ${acc.auth ? 'Connected' : 'No token'}</div>
+            </div>
+            <div style="display: flex; gap: 6px;">
+                ${!isActive ? `<button onclick="switchAccount('${acc.id}'); event.stopPropagation();" style="padding: 6px 12px; font-size: 11px; background: var(--accent-color); color: white; border: none; border-radius: 6px; cursor: pointer;">Switch</button>` : '<button style="padding: 6px 12px; font-size: 11px; background: var(--bg-tertiary); color: var(--text-secondary); border: none; border-radius: 6px; cursor: not-allowed;">Active</button>'}
+                <button onclick="removeAccount('${acc.id}'); event.stopPropagation();" style="padding: 6px 12px; font-size: 11px; background: var(--danger); color: white; border: none; border-radius: 6px; cursor: pointer;">${ICONS.ban(12)} Remove</button>
+            </div>
+        </div>`;
+    }).join('');
+    if (!savedAccounts.length) {
+        list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">No saved accounts. Log in to add one.</div>';
+    }
+}
+
 function renderLiveFarmProgress() {
+
     const container = document.getElementById('liveFarmProgress');
     const streamerEl = document.getElementById('liveFarmStreamer');
     const gameEl = document.getElementById('liveFarmGame');
@@ -3081,8 +3360,7 @@ async function processTokens(tokens, fromStorage = false) {
     if (tokenProcessingStarted) return;
 
     tokenProcessingStarted = true;
-    accountTokens = tokens;
-    localStorage.setItem('accountTokens', JSON.stringify(tokens));
+    syncAccountTokens(tokens);
 
     if (integritySafetyTimer) {
         clearTimeout(integritySafetyTimer);
@@ -3094,7 +3372,7 @@ async function processTokens(tokens, fromStorage = false) {
     let login = '';
     let avatarUrl = '';
     try {
-        const userRes = await window.electronAPI.getUserInfo(tokens);
+        const userRes = await window.electronAPI.getUserInfo(accountTokens);
         const user = userRes?.data?.currentUser;
         if (user) {
             displayName = user.displayName || user.login || 'User';
@@ -3107,9 +3385,18 @@ async function processTokens(tokens, fromStorage = false) {
         console.error("UserInfo Exception:", e);
     }
 
-    if (currentUserId && tokens.auth) {
+    // Update the active account's display info in savedAccounts
+    const activeAcc = savedAccounts.find(a => a.id === activeAccountId);
+    if (activeAcc) {
+        activeAcc.displayName = displayName || activeAcc.login;
+        activeAcc.login = login || activeAcc.login;
+        activeAcc.avatarUrl = avatarUrl || activeAcc.avatarUrl;
+        localStorage.setItem('savedAccounts', JSON.stringify(savedAccounts));
+    }
+
+    if (currentUserId && accountTokens.auth) {
         try {
-            await window.electronAPI.wsConnect(currentUserId, tokens.auth);
+            await window.electronAPI.wsConnect(currentUserId, accountTokens.auth);
             addLog('⚡ WebSocket connected — real-time drop updates active', 'system');
         } catch (e) {
             addLog('WebSocket connection failed, falling back to polling', 'warn');
@@ -3138,8 +3425,9 @@ async function processTokens(tokens, fromStorage = false) {
         loginBtnEl.style.padding = '3px 8px';
         loginBtnEl.style.fontSize = '11px';
         loginBtnEl.onclick = async () => {
-            localStorage.removeItem('accountTokens');
-            try { await window.electronAPI.wsDisconnect(); } catch (e) {}
+            if (activeAccountId) {
+                await removeAccount(activeAccountId);
+            }
             location.reload();
         };
     }
@@ -3164,6 +3452,7 @@ async function processTokens(tokens, fromStorage = false) {
     // third less network/CPU churn.
     farmingInterval = setInterval(fetchAndUpdateCampaigns, 45000);
     triggerAutoStartFarm();
+    renderAccountSelector();
 }
 
 window.electronAPI.onTokenCaptured(async (data) => {
@@ -3177,7 +3466,7 @@ window.electronAPI.onTokenCaptured(async (data) => {
     if (data.clientId) accountTokens.clientId = data.clientId;
     if (data.deviceId) accountTokens.deviceId = data.deviceId;
 
-    localStorage.setItem('accountTokens', JSON.stringify(accountTokens));
+    syncAccountTokens(accountTokens);
 
     const authChanged = oldAuth && data.auth && oldAuth !== data.auth;
 

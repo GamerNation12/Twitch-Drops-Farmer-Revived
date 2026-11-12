@@ -8,6 +8,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onIntegrityRefreshFailed: (callback) => ipcRenderer.on('integrity-refresh-failed', (_event, value) => callback(value)),
   requestDeviceCode: () => ipcRenderer.invoke('request-device-code'),
   pollDeviceToken: (deviceCode) => ipcRenderer.invoke('poll-device-token', deviceCode),
+  addAccountFromDeviceCode: (deviceCode) => ipcRenderer.invoke('add-account-from-device-code', deviceCode),
+
+  // Account management
+  getSavedAccounts: () => ipcRenderer.invoke('get-saved-accounts'),
+  switchAccount: (accountId) => ipcRenderer.invoke('switch-account', accountId),
+  removeAccount: (accountId) => ipcRenderer.invoke('remove-account', accountId),
 
   // GQL Queries
   getCampaigns: (tokens) => ipcRenderer.invoke('fetch-campaigns', tokens),

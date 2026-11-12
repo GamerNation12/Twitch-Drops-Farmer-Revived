@@ -458,6 +458,101 @@ ipcMain.handle('poll-device-token', async (event, deviceCode) => {
 });
 
 // ============================================================
+// LOCAL PATCH: multi-account storage & switching
+// Accounts are stored in userData/accounts.json as an array.
+// Each account: { id, login, displayName, avatarUrl, auth, integrity, clientId, deviceId, addedAt, isActive }
+// ============================================================
+const accountsPath = path.join(app.getPath('userData'), 'accounts.json');
+
+function loadAccounts() {
+  try {
+    if (fs.existsSync(accountsPath)) {
+      const data = JSON.parse(fs.readFileSync(accountsPath, 'utf8'));
+      return Array.isArray(data) ? data : [];
+    }
+  } catch (e) {}
+  return [];
+}
+
+function saveAccounts(accounts) {
+  try {
+    fs.writeFileSync(accountsPath, JSON.stringify(accounts, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Failed to save accounts:', e);
+  }
+}
+
+ipcMain.handle('get-saved-accounts', () => {
+  return loadAccounts();
+});
+
+ipcMain.handle('switch-account', (event, accountId) => {
+  const accounts = loadAccounts();
+  const target = accounts.find(a => a.id === accountId);
+  if (!target) return { error: 'Account not found' };
+
+  // Mark only this account as active
+  accounts.forEach(a => { a.isActive = (a.id === accountId); });
+  saveAccounts(accounts);
+
+  return { success: true, account: target };
+});
+
+ipcMain.handle('remove-account', (event, accountId) => {
+  let accounts = loadAccounts();
+  const removed = accounts.find(a => a.id === accountId);
+  accounts = accounts.filter(a => a.id !== accountId);
+
+  // If we removed the active account, activate another if any remain
+  if (removed && removed.isActive && accounts.length > 0) {
+    accounts[0].isActive = true;
+  }
+  saveAccounts(accounts);
+
+  return { success: true, removed, accounts };
+});
+
+ipcMain.handle('add-account-from-device-code', async (event, deviceCode) => {
+  try {
+    const tokenRes = await fetch('https://id.twitch.tv/oauth2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `client_id=ue6666qo983tsx6so1t0vnawi233wa&device_code=${encodeURIComponent(deviceCode)}&grant_type=urn:ietf:params:oauth:grant-type:device_code`
+    });
+    const tokenData = await tokenRes.json();
+    if (tokenData.error) return { error: tokenData.error_description || tokenData.error };
+
+    // Get user info from Twitch
+    const userRes = await fetch('https://api.twitch.tv/helix/users', {
+      headers: { 'Authorization': `Bearer ${tokenData.access_token}`, 'Client-Id': 'ue6666qo983tsx6so1t0vnawi233wa' }
+    });
+    const userData = await userRes.json();
+    const user = userData?.data?.[0];
+
+    const accounts = loadAccounts();
+    const newAccount = {
+      id: 'acc_' + Date.now(),
+      login: user?.login || 'unknown',
+      displayName: user?.display_name || 'Unknown',
+      avatarUrl: user?.profile_image_url || '',
+      auth: `OAuth ${tokenData.access_token}`,
+      integrity: '',
+      clientId: 'ue6666qo983tsx6so1t0vnawi233wa',
+      deviceId: '',
+      addedAt: Date.now(),
+      isActive: accounts.length === 0
+    };
+
+    accounts.push(newAccount);
+    saveAccounts(accounts);
+
+    return { success: true, account: newAccount };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// ============================================================
 // LOCAL PATCH: update check against this fork's GitHub releases
 // The renderer asks for this; the request has to happen here because the
 // GitHub API requires a User-Agent header, which the renderer cannot set.

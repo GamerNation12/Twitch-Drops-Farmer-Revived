@@ -3,6 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Drops Farmer Revived</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,7 +17,7 @@
     <div class="header-brand">
       <img src="assets/icon.png" alt="Logo">
       <span class="header-brand-title">Drops Farmer Revived</span>
-      <span class="header-brand-version" id="headerBrandVersion" title="App version">v1.3.6</span>
+      <span class="header-brand-version" id="headerBrandVersion" title="App version">v1.3.29</span>
     </div>
 
     <!-- Persistent Active Farm Status Pill (Center Header) -->
@@ -38,6 +39,20 @@
         <span class="status-indicator red" id="headerUserDot"></span>
         <img id="headerUserAvatar" class="header-user-avatar" src="" style="display: none;" />
         <span id="headerUserText" style="color: var(--text-secondary);">Not Connected</span>
+        <div id="accountSelector" class="account-selector" style="display: none;">
+          <button id="btnAccountDropdown" class="btn-account" style="padding: 2px 8px; font-size: 11px; width: auto; border-radius: 12px; display: inline-flex; align-items: center; gap: 6px; position: relative;">
+            <span id="accountDropdownName">Account</span>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-top: 1px;"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <div id="accountDropdownMenu" class="account-dropdown-menu" style="display: none; position: absolute; right: 0; top: 110%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; min-width: 200px; z-index: 1000; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+            <div id="accountList" style="max-height: 240px; overflow-y: auto;"></div>
+            <div style="border-top: 1px solid var(--border-color); margin-top: 8px; padding-top: 8px;">
+              <button id="btnAddAccount" class="btn-account-add" style="width: 100%; padding: 8px 12px; font-size: 11px; background: var(--accent-color); color: white; border: none; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add Account
+              </button>
+            </div>
+          </div>
+        </div>
         <button id="loginBtn" class="btn-primary" style="padding: 4px 10px; font-size: 11px; width: auto; border-radius: 12px;">Login</button>
       </div>
     </div>
@@ -58,7 +73,26 @@
         <svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
       </button>
     </div>
+    <!-- Mobile menu toggle -->
+    <button id="btnMobileMenu" class="mobile-menu-toggle" title="Menu" style="display: none;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
   </header>
+
+  <!-- Mobile nav overlay -->
+  <div id="mobileNavOverlay" class="mobile-menu-overlay">
+    <div style="padding: 20px; display: flex; flex-direction: column; gap: 12px; height: 100%;">
+      <button onclick="switchView('dashboard'); closeMobileMenu();" style="width: 100%; padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 10px; color: white; text-align: left; font-size: 15px; font-weight: 600; cursor: pointer;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;"><rect x="2" y="6" width="20" height="12" rx="6"/><line x1="8" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><circle cx="15" cy="13" r="1.2"/><circle cx="17.5" cy="10.5" r="1.2"/></svg>Dashboard</button>
+      <button onclick="switchView('campaigns'); closeMobileMenu();" style="width: 100%; padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 10px; color: white; text-align: left; font-size: 15px; font-weight: 600; cursor: pointer;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>Campaigns</button>
+      <button onclick="switchView('inventory'); closeMobileMenu();" style="width: 100%; padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 10px; color: white; text-align: left; font-size: 15px; font-weight: 600; cursor: pointer;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>Inventory</button>
+      <button onclick="switchView('settings'); closeMobileMenu();" style="width: 100%; padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 10px; color: white; text-align: left; font-size: 15px; font-weight: 600; cursor: pointer;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09A1.65 1.65 0 0 0 11 3.09a1.65 1.65 0 0 0 1-.59"/></svg>Settings</button>
+      <button onclick="switchView('logs'); closeMobileMenu();" style="width: 100%; padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 10px; color: white; text-align: left; font-size: 15px; font-weight: 600; cursor: pointer;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Logs</button>
+      <div style="flex: 1;"></div>
+      <div style="border-top: 1px solid var(--border-color); padding-top: 12px;">
+        <button id="btnMobileLogout" style="width: 100%; padding: 12px; background: var(--danger); color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;">Logout</button>
+      </div>
+    </div>
+  </div>
 
   <!-- APP MAIN BODY -->
   <div class="app-body">
@@ -486,6 +520,17 @@
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- ACCOUNTS -->
+        <div class="farm-panel settings-panel" style="margin-bottom: 16px; align-items: stretch;">
+          <h3 style="margin-bottom: 18px; font-size: 15px; font-weight: 700; width: 100%; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; color: white; display: flex; align-items: center; gap: 8px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.47V3h-1v3a4 4 0 0 1 4 4v2"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="16" y1="8" x2="23" y2="8"/></svg>
+            Saved Accounts
+          </h3>
+          <div id="settingsAccountsList" style="display: flex; flex-direction: column; gap: 8px;">
+            <!-- Accounts rendered by renderSettingsAccounts() -->
           </div>
         </div>
 

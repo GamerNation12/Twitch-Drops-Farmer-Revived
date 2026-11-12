@@ -2184,3 +2184,266 @@ select:focus-visible {
     animation: none;
   }
 }
+
+/* ============================================================
+   MOBILE / PHONE RESPONSIVE
+   ============================================================ */
+@media (max-width: 768px) {
+  .app-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px 16px;
+  }
+
+  .header-brand {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    order: 1;
+  }
+
+  .header-brand-title {
+    font-size: 16px;
+  }
+
+  .header-brand-version {
+    font-size: 10px;
+  }
+
+  #headerFarmWidget {
+    order: 2;
+    width: 100%;
+    justify-content: center;
+    padding: 6px 0;
+  }
+
+  .header-farm-info {
+    flex-direction: column;
+    gap: 2px;
+    align-items: center;
+    text-align: center;
+  }
+
+  .header-farm-controls {
+    margin-top: 4px;
+  }
+
+  .header-right {
+    order: 3;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .header-user-widget {
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+    text-align: center;
+  }
+
+  .header-user-widget img {
+    width: 32px;
+    height: 32px;
+  }
+
+  #btnAccountDropdown {
+    width: auto;
+    padding: 4px 10px;
+  }
+
+  .account-dropdown-menu {
+    position: fixed !important;
+    right: 16px !important;
+    top: 140px !important;
+    min-width: 220px;
+    max-height: 300px;
+  }
+
+  #btnMobileMenu {
+    display: block !important;
+    order: 4;
+    align-self: flex-start;
+  }
+
+  .window-controls {
+    order: 5;
+    width: 100%;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .win-ctrl-label {
+    display: none;
+  }
+
+  /* Sidebar navigation - stack vertically on mobile */
+  #sidebar,
+  [class*="sidebar"] {
+    position: fixed !important;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 260px;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    z-index: 2000;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    padding-top: 80px;
+  }
+
+  #sidebar.mobile-open,
+  [class*="sidebar"].mobile-open {
+    transform: translateX(0);
+  }
+
+  /* Main content - full width on mobile */
+  #viewDashboard,
+  #viewCampaigns,
+  #viewInventory,
+  #viewSettings,
+  #logsView {
+    padding: 12px 16px !important;
+  }
+
+  /* Campaign cards - full width on mobile */
+  .campaign-card,
+  .drop-item-row {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Farm panel - stack on mobile */
+  .farm-panel {
+    padding: 12px !important;
+    margin-bottom: 12px !important;
+  }
+
+  /* Settings rows - stack on mobile */
+  .settings-row-item {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+
+  .settings-row-item > div {
+    width: 100% !important;
+  }
+
+  /* Hide window controls labels on mobile */
+  .win-ctrl-label {
+    display: none;
+  }
+
+  /* Smaller fonts on mobile */
+  h1 { font-size: 18px !important; }
+  h2 { font-size: 16px !important; }
+  h3 { font-size: 14px !important; }
+
+  /* Buttons - full width on mobile where appropriate */
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger {
+    width: auto !important;
+    padding: 10px 16px !important;
+    font-size: 13px !important;
+  }
+
+  /* Live farm progress - compact on mobile */
+  #liveFarmProgress {
+    padding: 10px 14px !important;
+    margin-top: 10px !important;
+  }
+
+  #liveFarmProgress div:first-child {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  /* Dropdown menus - position properly on mobile */
+  .account-dropdown-menu,
+  .campaign-dropdown-menu {
+    position: fixed !important;
+    left: 16px !important;
+    right: 16px !important;
+    top: 160px !important;
+    transform: none !important;
+    max-height: 350px;
+  }
+
+  /* Modal / overlay - full screen on mobile */
+  [class*="modal"],
+  [class*="overlay"] {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    border-radius: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+  }
+
+  /* Scrollbar - thinner on mobile */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+}
+
+/* Very small phones */
+@media (max-width: 480px) {
+  .app-header {
+    padding: 8px 12px;
+  }
+
+  .header-brand-title {
+    font-size: 14px;
+  }
+
+  #headerFarmWidget {
+    padding: 4px 0;
+  }
+
+  .header-farm-info span {
+    font-size: 12px;
+  }
+
+  .header-farm-subtext,
+  #headerFarmSubtext {
+    font-size: 10px;
+  }
+
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger {
+    padding: 8px 14px !important;
+    font-size: 12px !important;
+  }
+
+  .farm-panel {
+    padding: 10px !important;
+  }
+
+  .account-dropdown-menu {
+    top: 140px !important;
+  }
+}
+
+/* Mobile menu overlay */
+.mobile-menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 1999;
+  display: none;
+  backdrop-filter: blur(4px);
+}
+
+.mobile-menu-overlay.mobile-open {
+  display: block;
+}
