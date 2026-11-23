@@ -691,7 +691,7 @@ if (btnNavInventory) btnNavInventory.onclick = () => switchView('inventory');
 if (btnNavSettings) btnNavSettings.onclick = () => switchView('settings');
 if (btnNavLogs) btnNavLogs.onclick = () => switchView('logs');
 
-let accountTokens = JSON.parse(localStorage.getItem('accountTokens') || 'null');
+let accountTokens = null;
 
 // LOCAL PATCH: the GQL client id must always be the *web* client id, because
 // every query this app sends is a web-client query. An earlier build of this
@@ -702,7 +702,7 @@ const WEB_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
 if (accountTokens && accountTokens.clientId !== WEB_CLIENT_ID) {
     console.warn(`[GQL] Replacing stored client id ${accountTokens.clientId} with the web client id`);
     accountTokens.clientId = WEB_CLIENT_ID;
-    localStorage.setItem('accountTokens', JSON.stringify(accountTokens));
+    window.electronAPI.saveAuthTokens(accountTokens);
 }
 let allCampaigns = [];
 let filteredCampaigns = [];
@@ -917,7 +917,7 @@ if (window.electronAPI && window.electronAPI.getAutoLaunch) {
             updateStartupSettingsUI();
             // If the account is already connected when the config lands, don't
             // wait for another token event before starting to farm.
-            if (accountTokens && accountTokens.auth) triggerAutoStartFarm();
+            
         }
     }).catch(e => console.error("Error loading auto launch config from main:", e));
 }
@@ -1007,12 +1007,7 @@ function triggerAutoStartFarm() {
     runMasterFarmLoop();
 }
 
-if (accountTokens && accountTokens.auth) {
-    showLoadingPlaceholder();
-    setTimeout(() => {
-        processTokens(accountTokens, true);
-    }, 500);
-}
+
 
 const toggleClaim = document.getElementById('toggleClaim');
 if (toggleClaim) {
@@ -3035,7 +3030,7 @@ function handleAuthExpired() {
     addLog(`Twitch session has expired or is invalid. Please log in again.`, 'error');
     showToast('Twitch session expired. Please log in again.', 'error');
     
-    localStorage.removeItem('accountTokens');
+    
     accountTokens = null;
 
     haltCurrentFarmWorker();
@@ -3082,7 +3077,7 @@ async function processTokens(tokens, fromStorage = false) {
 
     tokenProcessingStarted = true;
     accountTokens = tokens;
-    localStorage.setItem('accountTokens', JSON.stringify(tokens));
+    window.electronAPI.saveAuthTokens(tokens);
 
     if (integritySafetyTimer) {
         clearTimeout(integritySafetyTimer);
@@ -3138,8 +3133,23 @@ async function processTokens(tokens, fromStorage = false) {
         loginBtnEl.style.padding = '3px 8px';
         loginBtnEl.style.fontSize = '11px';
         loginBtnEl.onclick = async () => {
-            localStorage.removeItem('accountTokens');
+            console.log('[LOGOUT] Starting logout...');
+            window.isLoggingOut = true;
+            try { await window.electronAPI.clearAllData(); } catch (e) { console.error('[LOGOUT] clearAllData error:', e); }
+            try { localStorage.clear(); } catch (e) {}
+            accountTokens = null;
+            currentUserId = null;
+            activeFarmingCampaignId = null;
+            currentFarmingChannelId = null;
+            activeFarmingChannelLogin = null;
+            allCampaigns = [];
+            filteredCampaigns = [];
+            haltCurrentFarmWorker();
+            if (farmingInterval) { clearInterval(farmingInterval); farmingInterval = null; }
+            if (uiTimerInterval) { clearInterval(uiTimerInterval); uiTimerInterval = null; }
             try { await window.electronAPI.wsDisconnect(); } catch (e) {}
+            try { await window.electronAPI.clearAuth(); } catch (e) {}
+            console.log('[LOGOUT] All cleared, reloading...');
             location.reload();
         };
     }
@@ -3177,7 +3187,7 @@ window.electronAPI.onTokenCaptured(async (data) => {
     if (data.clientId) accountTokens.clientId = data.clientId;
     if (data.deviceId) accountTokens.deviceId = data.deviceId;
 
-    localStorage.setItem('accountTokens', JSON.stringify(accountTokens));
+    window.electronAPI.saveAuthTokens(accountTokens);
 
     const authChanged = oldAuth && data.auth && oldAuth !== data.auth;
 

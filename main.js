@@ -338,13 +338,14 @@ session.defaultSession.webRequest.onBeforeSendHeaders(
       }
       
       // Deduplicate: only notify mainWindow if tokens actually changed
-      if ((auth && auth !== lastCapturedAuth) || (integrity && integrity !== lastCapturedIntegrity)) {
-        if (auth) lastCapturedAuth = auth;
-        if (integrity) lastCapturedIntegrity = integrity;
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('auth-token-captured', { auth, integrity, clientId, deviceId });
-        }
-      }
+      // Auto-connect disabled - user must manually log in
+      // if ((auth && auth !== lastCapturedAuth) || (integrity && integrity !== lastCapturedIntegrity)) {
+      //   if (auth) lastCapturedAuth = auth;
+      //   if (integrity) lastCapturedIntegrity = integrity;
+      //   if (mainWindow && !mainWindow.isDestroyed()) {
+      //     mainWindow.webContents.send('auth-token-captured', { auth, integrity, clientId, deviceId });
+      //   }
+      // }
     }
     callback({ requestHeaders: details.requestHeaders });
   }
@@ -1175,6 +1176,58 @@ ipcMain.handle('ws-connect', async (event, userId, authToken) => {
 
 ipcMain.handle('ws-status', async () => wsManager.getStatus());
 ipcMain.handle('ws-disconnect', async () => { wsManager.disconnect(); return { success: true }; });
+ipcMain.handle('clear-auth', async () => {
+  try {
+    const authPath = path.join(app.getPath('userData'), 'auth.json');
+    if (fs.existsSync(authPath)) fs.unlinkSync(authPath);
+  } catch (e) {}
+  return { success: true };
+});
+
+ipcMain.handle('clear-all-data', async () => {
+  try {
+    // Clear all Electron storage (localStorage, IndexedDB, cookies, cache, etc.)
+    const session = require('electron').session;
+    const mainSession = session.fromPartition('persist:name');
+    await mainSession.clearStorageData({
+      origin: '*',
+      storages: ['cookies', 'localStorage', 'sessionStorage', 'indexedDB', 'cache', 'serviceWorkers', 'fileSystem']
+    });
+    console.log('[main] clearAllData: cleared all Electron storage');
+  } catch (e) {
+    console.error('[main] clearAllData error:', e);
+  }
+  
+  // Also delete the auth file
+  try {
+    const authPath = path.join(app.getPath('userData'), 'auth.json');
+    if (fs.existsSync(authPath)) fs.unlinkSync(authPath);
+  } catch (e) {}
+  
+  return { success: true };
+});
+
+ipcMain.handle('save-auth-tokens', async (event, tokens) => {
+  try {
+    const authPath = path.join(app.getPath('userData'), 'auth.json');
+    fs.writeFileSync(authPath, JSON.stringify(tokens), 'utf8');
+    return { success: true };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+ipcMain.handle('load-auth-tokens', async () => {
+  try {
+    const authPath = path.join(app.getPath('userData'), 'auth.json');
+    if (fs.existsSync(authPath)) {
+      const data = fs.readFileSync(authPath, 'utf8');
+      return { success: true, tokens: JSON.parse(data) };
+    }
+  } catch (e) {}
+  return { success: false };
+});
+
 ipcMain.handle('get-app-version', () => app.getVersion());
 
 // Discord RPC IPC handlers
@@ -1447,64 +1500,6 @@ ipcMain.on('refresh-integrity-token', () => {
 let lastCaptureAt = 0;   // module scope: also set by the gql interceptor above
 let autoAuthWin = null;
 
-async function trySilentAutoConnect() {
-  try {
-    if (lastCaptureAt) return true;
-
-    const authCookies = await session.defaultSession.cookies.get({ name: 'auth-token' });
-    const authCookie = (authCookies || []).find((c) => /twitch\.tv$/.test(c.domain));
-    if (!authCookie || !authCookie.value) {
-      console.log('[AutoConnect] no auth-token cookie stored in this profile');
-      return false;
-    }
-
-    const idCookies = await session.defaultSession.cookies.get({ name: 'unique_id' });
-    const deviceId = (idCookies && idCookies.length) ? idCookies[0].value : '';
-
-    const headers = {
-      'Client-Id': 'kimne78kx3ncx6brgo4mv6wki5h1ko',
-      'Authorization': 'OAuth ' + authCookie.value,
-      'Content-Type': 'application/json'
-    };
-    if (deviceId) headers['X-Device-Id'] = deviceId;
-
-    const res = await fetch('https://gql.twitch.tv/gql', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ query: '{ currentUser { id login } }' })
-    });
-    const payload = await res.json();
-    const user = payload && payload.data && payload.data.currentUser;
-    if (!user) {
-      console.log('[AutoConnect] stored session was rejected:', JSON.stringify(payload).slice(0, 200));
-      return false;
-    }
-
-    lastCaptureAt = Date.now();
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('auth-token-captured', {
-        auth: headers['Authorization'],
-        integrity: '',
-        clientId: headers['Client-Id'],
-        deviceId
-      });
-    }
-    console.log('[AutoConnect] Connected as', user.login);
-    return true;
-  } catch (e) {
-    console.error('[AutoConnect] failed:', e && e.message);
-    return false;
-  }
-}
-
-app.whenReady().then(() => {
-  if (!gotSingleInstanceLock) return;
-  setTimeout(() => {
-    trySilentAutoConnect().then((ok) => {
-      if (!ok) console.log('[AutoConnect] no stored Twitch session found - use the Login button when you are ready.');
-    });
-  }, 2500);
-});
 
 // Opt-in only, and never triggered automatically: pass --twitch-login to get a
 // one-time Twitch sign-in window, in case the profile ever loses its session.
